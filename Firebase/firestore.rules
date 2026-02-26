@@ -1,0 +1,410 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**********************
+     * Layer 1: Access Boundary
+     **********************/
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Can read historical data even when group is inactive.
+    function isGroupParticipant(groupId) {
+      let groupPath = /databases/$(database)/documents/groups/$(groupId);
+      let group = get(groupPath);
+      return isSignedIn()
+        && group.data.memberIds is list
+        && request.auth.uid in group.data.memberIds;
+    }
+
+    // Can write only while group is active.
+    function isActiveGroupMember(groupId) {
+      let groupPath = /databases/$(database)/documents/groups/$(groupId);
+      let group = get(groupPath);
+      return isSignedIn()
+        && group.data.memberIds is list
+        && request.auth.uid in group.data.memberIds
+        && group.data.status == "active";
+    }
+
+    function isInviteParticipant(inviteData) {
+      return isSignedIn()
+        && (request.auth.uid == inviteData.fromUid || request.auth.uid == inviteData.toUid);
+    }
+
+    /**********************
+     * Layer 2: State Machine
+     **********************/
+    function hasAcceptedInvite(inviteId, members) {
+      let invite = get(/databases/$(database)/documents/invites/$(inviteId));
+      return inviteId is string
+        && members is list
+        && members.size() == 2
+        && invite.data.status == "accepted"
+        && invite.data.fromUid in members
+        && invite.data.toUid in members
+        && invite.data.fromUid != invite.data.toUid;
+    }
+
+    function validInviteTransition() {
+      return (
+          request.resource.data.status in ["accepted", "rejected"]
+          && request.auth.uid == resource.data.toUid
+        )
+        || (
+          request.resource.data.status == "expired"
+          && isInviteParticipant(resource.data)
+        );
+    }
+
+    function isGroupLinkProfileUpdate(uid) {
+      return isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["currentGroupId", "updatedAt"])
+        && request.resource.data.currentGroupId is string
+        && request.resource.data.updatedAt == request.time
+        && isGroupLinkProfileUpdateForGroup(uid, request.resource.data.currentGroupId);
+    }
+
+    function isGroupLinkProfileUpdateForGroup(uid, groupId) {
+      let groupAfter = getAfter(/databases/$(database)/documents/groups/$(groupId));
+      let inviteId = groupAfter.data.sourceInviteId;
+      let invite = get(/databases/$(database)/documents/invites/$(inviteId));
+
+      return groupAfter.data.status == "active"
+        && groupAfter.data.memberIds is list
+        && groupAfter.data.memberIds.size() == 2
+        && inviteId is string
+        && invite.data.status == "accepted"
+        && uid in groupAfter.data.memberIds
+        && request.auth.uid in groupAfter.data.memberIds
+        && uid in [invite.data.fromUid, invite.data.toUid]
+        && request.auth.uid in [invite.data.fromUid, invite.data.toUid];
+    }
+
+    function isGroupUnlinkProfileUpdate(uid) {
+      return isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["currentGroupId", "updatedAt"])
+        && request.resource.data.currentGroupId == null
+        && request.resource.data.updatedAt == request.time
+        && resource.data.currentGroupId is string
+        && isGroupUnlinkProfileUpdateForGroup(uid, resource.data.currentGroupId);
+    }
+
+    function isGroupUnlinkProfileUpdateForGroup(uid, groupId) {
+      let groupAfter = getAfter(/databases/$(database)/documents/groups/$(groupId));
+      return groupAfter.data.status == "inactive"
+        && groupAfter.data.memberIds is list
+        && uid in groupAfter.data.memberIds
+        && request.auth.uid in groupAfter.data.memberIds;
+    }
+
+    /**********************
+     * Layer 3: Field Validation
+     **********************/
+    function isNullableString(v) {
+      return v == null || v is string;
+    }
+
+    function isNumber(v) {
+      return v is int || v is float;
+    }
+
+    function validMediaEntry(entry) {
+      return entry is map
+        && entry.keys().hasAll(["storagePath", "contentType"])
+        && entry.keys().hasOnly(["storagePath", "contentType"])
+        && entry.storagePath is string
+        && entry.storagePath.matches('^groups/[^/]+/events/[^/]+/[^/]+$')
+        && entry.contentType is string
+        && entry.contentType.matches('^image/(jpeg|jpg|png|heic|heif|webp)$');
+    }
+
+    function validMediaList(media) {
+      return media == null
+        || (
+          media is list
+          && media.size() <= 3
+          && (media.size() == 0 || validMediaEntry(media[0]))
+          && (media.size() <= 1 || validMediaEntry(media[1]))
+          && (media.size() <= 2 || validMediaEntry(media[2]))
+        );
+    }
+
+    function validUserData(data) {
+      return data.keys().hasAll(["displayName", "email", "emailLower", "createdAt", "updatedAt"])
+        && data.keys().hasOnly([
+          "displayName", "email", "emailLower", "photoURL", "currentGroupId", "createdAt", "updatedAt", "fcmToken"
+        ])
+        && data.displayName is string
+        && data.email is string
+        && data.emailLower is string
+        && isNullableString(data.photoURL)
+        && isNullableString(data.currentGroupId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && isNullableString(data.fcmToken);
+    }
+
+    function validUserCreate() {
+      return validUserData(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    // Self updates are limited to user-facing fields; system fields are immutable.
+    function validUserSelfUpdate() {
+      let d = request.resource.data;
+      return validUserData(d)
+        && d.diff(resource.data).affectedKeys().hasOnly(["displayName", "photoURL", "fcmToken", "updatedAt"])
+        && d.updatedAt == request.time
+        && d.createdAt == resource.data.createdAt
+        && d.email == resource.data.email
+        && d.emailLower == resource.data.emailLower
+        && d.currentGroupId == resource.data.currentGroupId;
+    }
+
+    function validInviteCreate() {
+      let d = request.resource.data;
+      return d.keys().hasAll(["fromUid", "toUid", "status", "createdAt"])
+        && d.keys().hasOnly(["fromUid", "fromDisplayName", "fromEmail", "toUid", "status", "createdAt", "respondedAt", "expiresAt"])
+        && d.fromUid is string
+        && d.toUid is string
+        && d.fromUid != d.toUid
+        && isNullableString(d.fromDisplayName)
+        && isNullableString(d.fromEmail)
+        && d.status == "pending"
+        && d.createdAt == request.time
+        && (d.expiresAt == null || d.expiresAt is timestamp)
+        && d.respondedAt == null;
+    }
+
+    function validInviteUpdate() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(["fromUid", "fromDisplayName", "fromEmail", "toUid", "status", "createdAt", "respondedAt", "expiresAt"])
+        && d.diff(resource.data).affectedKeys().hasOnly(["status", "respondedAt"])
+        && d.fromUid == resource.data.fromUid
+        && d.toUid == resource.data.toUid
+        && d.fromDisplayName == resource.data.fromDisplayName
+        && d.fromEmail == resource.data.fromEmail
+        && d.createdAt == resource.data.createdAt
+        && d.expiresAt == resource.data.expiresAt
+        && d.respondedAt == request.time
+        && d.status in ["accepted", "rejected", "expired"];
+    }
+
+    function validGroupCreate() {
+      let d = request.resource.data;
+      return d.keys().hasAll([
+          "groupName", "memberIds", "createdBy", "sourceInviteId", "status", "loveBalance", "lastEventAt", "createdAt", "updatedAt"
+        ])
+        && d.keys().hasOnly([
+          "groupName", "memberIds", "createdBy", "sourceInviteId", "status", "loveBalance", "lastEventAt", "createdAt", "updatedAt"
+        ])
+        && d.groupName is string
+        && d.memberIds is list
+        && d.memberIds.size() == 2
+        && d.memberIds[0] is string
+        && d.memberIds[1] is string
+        && d.memberIds[0] != d.memberIds[1]
+        && d.createdBy is string
+        && d.createdBy in d.memberIds
+        && d.sourceInviteId is string
+        && d.status == "active"
+        && d.loveBalance is int
+        && d.lastEventAt is timestamp
+        && d.createdAt == request.time
+        && d.updatedAt == request.time;
+    }
+
+    // Transactional aggregate update driven by event creation.
+    function validGroupAggregateUpdate() {
+      let d = request.resource.data;
+      return d.diff(resource.data).affectedKeys().hasOnly(["loveBalance", "lastEventAt", "updatedAt"])
+        && d.groupName == resource.data.groupName
+        && d.memberIds == resource.data.memberIds
+        && d.createdBy == resource.data.createdBy
+        && d.sourceInviteId == resource.data.sourceInviteId
+        && d.status == resource.data.status
+        && d.createdAt == resource.data.createdAt
+        && d.loveBalance is int
+        && d.lastEventAt is timestamp
+        && d.updatedAt == request.time
+        && d.lastEventAt >= resource.data.lastEventAt;
+    }
+
+    // Soft unlink transition: active -> inactive.
+    function validGroupSoftUnlinkUpdate() {
+      let d = request.resource.data;
+      return d.diff(resource.data).affectedKeys().hasOnly(["status", "updatedAt"])
+        && d.groupName == resource.data.groupName
+        && d.memberIds == resource.data.memberIds
+        && d.createdBy == resource.data.createdBy
+        && d.sourceInviteId == resource.data.sourceInviteId
+        && d.loveBalance == resource.data.loveBalance
+        && d.lastEventAt == resource.data.lastEventAt
+        && d.createdAt == resource.data.createdAt
+        && resource.data.status == "active"
+        && d.status == "inactive"
+        && d.updatedAt == request.time;
+    }
+
+    function validEventCreate() {
+      let d = request.resource.data;
+      return d.keys().hasAll(["createdBy", "type", "tapCount", "delta", "occurredAt", "location", "createdAt", "recordedAt", "updatedAt"])
+        && d.keys().hasOnly(["createdBy", "type", "tapCount", "delta", "note", "occurredAt", "location", "media", "createdAt", "recordedAt", "updatedAt"])
+        && d.createdBy is string
+        && d.type in ["deposit", "withdraw"]
+        && d.tapCount is int
+        && d.tapCount > 0
+        && d.delta is int
+        && isNullableString(d.note)
+        && d.occurredAt is timestamp
+        && d.location is map
+        && isNumber(d.location.lat)
+        && isNumber(d.location.lng)
+        && isNullableString(d.location.addressText)
+        && validMediaList(d.media)
+        && d.createdAt == request.time
+        && d.recordedAt == request.time
+        && d.updatedAt == request.time;
+    }
+
+    // Event edits: only user-facing fields are mutable.
+    function validEventUpdate() {
+      let d = request.resource.data;
+      return d.diff(resource.data).affectedKeys().hasOnly(["note", "location", "media", "updatedAt"])
+        && d.createdBy == resource.data.createdBy
+        && d.type == resource.data.type
+        && d.tapCount == resource.data.tapCount
+        && d.delta == resource.data.delta
+        && d.occurredAt == resource.data.occurredAt
+        && d.createdAt == resource.data.createdAt
+        && d.recordedAt == resource.data.recordedAt
+        && isNullableString(d.note)
+        && d.location is map
+        && isNumber(d.location.lat)
+        && isNumber(d.location.lng)
+        && isNullableString(d.location.addressText)
+        && validMediaList(d.media)
+        && d.updatedAt == request.time;
+    }
+
+    function validChatCreate() {
+      let d = request.resource.data;
+      return d.keys().hasAll(["createdBy", "createdAt", "updatedAt", "lastMessageAt"])
+        && d.keys().hasOnly(["createdBy", "title", "createdAt", "updatedAt", "lastMessageAt"])
+        && d.createdBy == request.auth.uid
+        && isNullableString(d.title)
+        && d.createdAt == request.time
+        && d.updatedAt == request.time
+        && d.lastMessageAt is timestamp;
+    }
+
+    function validChatUpdate() {
+      let d = request.resource.data;
+      return d.diff(resource.data).affectedKeys().hasOnly(["title", "updatedAt", "lastMessageAt"])
+        && d.createdBy == resource.data.createdBy
+        && d.createdAt == resource.data.createdAt
+        && isNullableString(d.title)
+        && d.updatedAt == request.time
+        && d.lastMessageAt is timestamp
+        && d.lastMessageAt >= resource.data.lastMessageAt;
+    }
+
+    function validMessageCreate() {
+      let d = request.resource.data;
+      return d.keys().hasAll(["role", "content", "createdAt"])
+        && d.keys().hasOnly(["role", "content", "createdAt"])
+        && d.role in ["user", "assistant", "system"]
+        && d.content is string
+        && d.createdAt == request.time;
+    }
+
+    /**********************
+     * Rules by Path
+     **********************/
+    match /users/{uid} {
+      allow create: if isSelf(uid) && validUserCreate();
+      allow read: if isSelf(uid);
+      allow delete: if isSelf(uid);
+
+      allow update: if
+        (isSelf(uid) && validUserSelfUpdate())
+        || isGroupLinkProfileUpdate(uid)
+        || isGroupUnlinkProfileUpdate(uid);
+    }
+
+    // Deprecated: resolver moved to Cloud Functions (Admin SDK).
+    match /userLookup/{uid} {
+      allow read, write: if false;
+    }
+
+    match /invites/{inviteId} {
+      allow create: if isSignedIn()
+        && request.auth.uid == request.resource.data.fromUid
+        && validInviteCreate();
+
+      allow read: if isInviteParticipant(resource.data);
+
+      allow update: if isInviteParticipant(resource.data)
+        && resource.data.status == "pending"
+        && validInviteUpdate()
+        && validInviteTransition();
+
+      allow delete: if false;
+    }
+
+    match /groups/{groupId} {
+      allow create: if isSignedIn()
+        && validGroupCreate()
+        && request.auth.uid in request.resource.data.memberIds
+        && request.auth.uid == get(/databases/$(database)/documents/invites/$(request.resource.data.sourceInviteId)).data.toUid
+        && request.resource.data.createdBy == get(/databases/$(database)/documents/invites/$(request.resource.data.sourceInviteId)).data.fromUid
+        && hasAcceptedInvite(request.resource.data.sourceInviteId, request.resource.data.memberIds);
+
+      // Read includes inactive groups for historical access.
+      allow read: if isGroupParticipant(groupId);
+
+      // Writes require active status and strict transition checks.
+      allow update: if isActiveGroupMember(groupId)
+        && (validGroupAggregateUpdate() || validGroupSoftUnlinkUpdate());
+
+      allow delete: if false;
+
+      match /events/{eventId} {
+        allow create: if isActiveGroupMember(groupId)
+          && request.resource.data.createdBy == request.auth.uid
+          && validEventCreate();
+
+        allow read: if isGroupParticipant(groupId);
+
+        allow update: if isActiveGroupMember(groupId)
+          && resource.data.createdBy == request.auth.uid
+          && validEventUpdate();
+
+        allow delete: if false;
+      }
+
+      match /chats/{chatId} {
+        allow create: if isActiveGroupMember(groupId)
+          && validChatCreate();
+        allow read: if isGroupParticipant(groupId);
+        allow update: if isActiveGroupMember(groupId)
+          && validChatUpdate();
+        allow delete: if false;
+
+        match /messages/{messageId} {
+          allow create: if isActiveGroupMember(groupId)
+            && validMessageCreate();
+          allow read: if isGroupParticipant(groupId);
+          allow update, delete: if false;
+        }
+      }
+    }
+  }
+}

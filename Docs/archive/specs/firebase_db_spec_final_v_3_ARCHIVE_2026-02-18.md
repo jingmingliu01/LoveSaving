@@ -1,4 +1,7 @@
-# Firebase Database Specification (Firestore + Storage)
+# ARCHIVE: Firebase Database Specification v3 (Firestore + Storage)
+
+> Archive status: This document is a historical design snapshot and is not the current source of truth.
+> Current live spec: `/Users/jimmy/Desktop/LoveBank/Firebase/docs/DB_SPEC_2026-02-26.md`
 
 ## 1. Scope
 This specification defines the Firestore and Storage data model for an iOS app where the product is **usable only after two users link into a single Group**. All core data is Group-scoped.
@@ -286,4 +289,3 @@ Typical indexes
 - Users may read/write `groups/{groupId}/...` only if `request.auth.uid` is in `groups/{groupId}.memberIds` and `groups/{groupId}.status == "active"`.
 - Users may read/write an Invite only if `request.auth.uid == fromUid` OR `request.auth.uid == toUid`.
 - Users may read/write `users/{uid}` only for their own `uid` (or restrict writes to specific fields as needed).
-

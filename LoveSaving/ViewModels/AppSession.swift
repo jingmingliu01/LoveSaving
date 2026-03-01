@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 import Combine
+import FirebaseCrashlytics
 
 @MainActor
 final class AppSession: ObservableObject {
@@ -391,6 +392,9 @@ final class AppSession: ObservableObject {
             try await operation()
             return true
         } catch {
+            if !(error is AppError) {
+                Crashlytics.crashlytics().record(error: error)
+            }
             globalErrorMessage = error.localizedDescription
             return false
         }

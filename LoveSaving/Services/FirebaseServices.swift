@@ -4,6 +4,7 @@ import FirebaseCore
 @preconcurrency import FirebaseFirestore
 import FirebaseFunctions
 import FirebaseMessaging
+import FirebasePerformance
 import FirebaseStorage
 #if canImport(UIKit)
 import UIKit
@@ -39,47 +40,51 @@ final class FirebaseAuthService: AuthServicing {
     }
 
     func signUp(email: String, password: String, displayName: String) async throws -> AuthUser {
-        let result: AuthDataResult = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
-            auth.createUser(withEmail: email, password: password) { result, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let result {
-                    continuation.resume(returning: result)
+        try await withPerformanceTrace("auth_sign_up") {
+            let result: AuthDataResult = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
+                auth.createUser(withEmail: email, password: password) { result, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let result {
+                        continuation.resume(returning: result)
+                    }
                 }
             }
-        }
 
-        let request = result.user.createProfileChangeRequest()
-        request.displayName = displayName
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            request.commitChanges { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
+            let request = result.user.createProfileChangeRequest()
+            request.displayName = displayName
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                request.commitChanges { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: ())
+                    }
                 }
             }
-        }
 
-        return AuthUser(uid: result.user.uid, email: email, displayName: displayName)
+            return AuthUser(uid: result.user.uid, email: email, displayName: displayName)
+        }
     }
 
     func signIn(email: String, password: String) async throws -> AuthUser {
-        let result: AuthDataResult = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
-            auth.signIn(withEmail: email, password: password) { result, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let result {
-                    continuation.resume(returning: result)
+        try await withPerformanceTrace("auth_sign_in") {
+            let result: AuthDataResult = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
+                auth.signIn(withEmail: email, password: password) { result, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let result {
+                        continuation.resume(returning: result)
+                    }
                 }
             }
-        }
 
-        guard let resolvedEmail = result.user.email else {
-            throw AppError.userNotFound
-        }
+            guard let resolvedEmail = result.user.email else {
+                throw AppError.userNotFound
+            }
 
-        return AuthUser(uid: result.user.uid, email: resolvedEmail, displayName: result.user.displayName)
+            return AuthUser(uid: result.user.uid, email: resolvedEmail, displayName: result.user.displayName)
+        }
     }
 
     func signOut() throws {
@@ -114,35 +119,37 @@ final class FirebaseUserDataService: UserDataServicing {
     }
 
     func upsertUser(_ user: UserProfile) async throws {
-        let emailLower = user.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let userRef = db.collection("users").document(user.id)
-        let snapshot = try await userRef.getDocument()
-        let batch = db.batch()
+        try await withPerformanceTrace("user_upsert_profile") {
+            let emailLower = user.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let userRef = db.collection("users").document(user.id)
+            let snapshot = try await userRef.getDocument()
+            let batch = db.batch()
 
-        if snapshot.exists {
-            batch.setData([
-                "displayName": user.displayName,
-                "email": user.email,
-                "emailLower": emailLower,
-                "photoURL": firestoreNullable(user.photoURL),
-                "currentGroupId": firestoreNullable(user.currentGroupId),
-                "updatedAt": FieldValue.serverTimestamp(),
-                "fcmToken": firestoreNullable(user.fcmToken)
-            ], forDocument: userRef, merge: true)
-        } else {
-            batch.setData([
-                "displayName": user.displayName,
-                "email": user.email,
-                "emailLower": emailLower,
-                "photoURL": firestoreNullable(user.photoURL),
-                "currentGroupId": firestoreNullable(user.currentGroupId),
-                "createdAt": FieldValue.serverTimestamp(),
-                "updatedAt": FieldValue.serverTimestamp(),
-                "fcmToken": firestoreNullable(user.fcmToken)
-            ], forDocument: userRef, merge: true)
+            if snapshot.exists {
+                batch.setData([
+                    "displayName": user.displayName,
+                    "email": user.email,
+                    "emailLower": emailLower,
+                    "photoURL": firestoreNullable(user.photoURL),
+                    "currentGroupId": firestoreNullable(user.currentGroupId),
+                    "updatedAt": FieldValue.serverTimestamp(),
+                    "fcmToken": firestoreNullable(user.fcmToken)
+                ], forDocument: userRef, merge: true)
+            } else {
+                batch.setData([
+                    "displayName": user.displayName,
+                    "email": user.email,
+                    "emailLower": emailLower,
+                    "photoURL": firestoreNullable(user.photoURL),
+                    "currentGroupId": firestoreNullable(user.currentGroupId),
+                    "createdAt": FieldValue.serverTimestamp(),
+                    "updatedAt": FieldValue.serverTimestamp(),
+                    "fcmToken": firestoreNullable(user.fcmToken)
+                ], forDocument: userRef, merge: true)
+            }
+
+            try await batch.commit()
         }
-
-        try await batch.commit()
     }
 
     func fetchUser(uid: String) async throws -> UserProfile? {
@@ -154,18 +161,20 @@ final class FirebaseUserDataService: UserDataServicing {
     }
 
     func findUser(email: String) async throws -> UserProfile? {
-        guard let resolved = try await resolveUserByIdentifier(email) else {
-            return nil
+        try await withPerformanceTrace("user_find_by_identifier") {
+            guard let resolved = try await resolveUserByIdentifier(email) else {
+                return nil
+            }
+            let now = Date()
+            return UserProfile(
+                id: resolved.uid,
+                displayName: resolved.displayName ?? "LoveBank User",
+                email: resolved.email ?? email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                currentGroupId: nil,
+                createdAt: now,
+                updatedAt: now
+            )
         }
-        let now = Date()
-        return UserProfile(
-            id: resolved.uid,
-            displayName: resolved.displayName ?? "LoveBank User",
-            email: resolved.email ?? email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-            currentGroupId: nil,
-            createdAt: now,
-            updatedAt: now
-        )
     }
 
     func resolveUserID(identifier: String) async throws -> String? {
@@ -300,51 +309,53 @@ final class FirebaseGroupService: GroupServicing {
     }
 
     func createGroupAndLinkUsers(invite: Invite, groupName: String) async throws -> LoveGroup {
-        guard invite.status == .pending || invite.status == .accepted else {
-            throw AppError.invalidInviteState
+        try await withPerformanceTrace("group_create_and_link_users") {
+            guard invite.status == .pending || invite.status == .accepted else {
+                throw AppError.invalidInviteState
+            }
+
+            let groupRef = db.collection("groups").document()
+            let now = Date()
+
+            let group = LoveGroup(
+                id: groupRef.documentID,
+                groupName: groupName,
+                memberIds: [invite.fromUid, invite.toUid],
+                createdBy: invite.fromUid,
+                status: .active,
+                loveBalance: 0,
+                lastEventAt: now,
+                createdAt: now,
+                updatedAt: now
+            )
+
+            let batch = db.batch()
+            batch.setData([
+                "groupName": group.groupName,
+                "memberIds": group.memberIds,
+                "createdBy": group.createdBy,
+                "sourceInviteId": invite.id,
+                "status": group.status.rawValue,
+                "loveBalance": group.loveBalance,
+                "lastEventAt": Timestamp(date: group.lastEventAt),
+                "createdAt": FieldValue.serverTimestamp(),
+                "updatedAt": FieldValue.serverTimestamp()
+            ], forDocument: groupRef)
+
+            let fromRef = db.collection("users").document(invite.fromUid)
+            let toRef = db.collection("users").document(invite.toUid)
+            batch.setData([
+                "currentGroupId": group.id,
+                "updatedAt": FieldValue.serverTimestamp()
+            ], forDocument: fromRef, merge: true)
+            batch.setData([
+                "currentGroupId": group.id,
+                "updatedAt": FieldValue.serverTimestamp()
+            ], forDocument: toRef, merge: true)
+
+            try await batch.commit()
+            return group
         }
-
-        let groupRef = db.collection("groups").document()
-        let now = Date()
-
-        let group = LoveGroup(
-            id: groupRef.documentID,
-            groupName: groupName,
-            memberIds: [invite.fromUid, invite.toUid],
-            createdBy: invite.fromUid,
-            status: .active,
-            loveBalance: 0,
-            lastEventAt: now,
-            createdAt: now,
-            updatedAt: now
-        )
-
-        let batch = db.batch()
-        batch.setData([
-            "groupName": group.groupName,
-            "memberIds": group.memberIds,
-            "createdBy": group.createdBy,
-            "sourceInviteId": invite.id,
-            "status": group.status.rawValue,
-            "loveBalance": group.loveBalance,
-            "lastEventAt": Timestamp(date: group.lastEventAt),
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: groupRef)
-
-        let fromRef = db.collection("users").document(invite.fromUid)
-        let toRef = db.collection("users").document(invite.toUid)
-        batch.setData([
-            "currentGroupId": group.id,
-            "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: fromRef, merge: true)
-        batch.setData([
-            "currentGroupId": group.id,
-            "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: toRef, merge: true)
-
-        try await batch.commit()
-        return group
     }
 
     func softUnlink(group: LoveGroup) async throws {
@@ -376,89 +387,93 @@ final class FirebaseEventService: EventServicing {
     }
 
     func createEventAndUpdateGroup(groupId: String, createdBy: String, draft: EventDraft, eventId: String?) async throws -> LoveEvent {
-        let groupRef = db.collection("groups").document(groupId)
-        let now = Date()
+        try await withPerformanceTrace("event_create_and_update_group") {
+            let groupRef = db.collection("groups").document(groupId)
+            let now = Date()
 
-        let eventID: String = try await withCheckedThrowingContinuation { continuation in
-            db.runTransaction({ transaction, errorPointer -> Any? in
-                do {
-                    let groupSnapshot = try transaction.getDocument(groupRef)
-                    guard let groupData = groupSnapshot.data(),
-                          let statusRaw = groupData["status"] as? String,
-                          statusRaw == GroupStatus.active.rawValue else {
-                        throw AppError.invalidGroupState
+            let eventID: String = try await withCheckedThrowingContinuation { continuation in
+                db.runTransaction({ transaction, errorPointer -> Any? in
+                    do {
+                        let groupSnapshot = try transaction.getDocument(groupRef)
+                        guard let groupData = groupSnapshot.data(),
+                              let statusRaw = groupData["status"] as? String,
+                              statusRaw == GroupStatus.active.rawValue else {
+                            throw AppError.invalidGroupState
+                        }
+
+                        let previousLastEvent = (groupData["lastEventAt"] as? Timestamp)?.dateValue() ?? draft.occurredAt
+                        let nextLastEvent = max(previousLastEvent, draft.occurredAt)
+
+                        let eventRef = eventId.map { groupRef.collection("events").document($0) }
+                            ?? groupRef.collection("events").document()
+                        transaction.setData([
+                            "createdBy": createdBy,
+                            "type": draft.type.rawValue,
+                            "tapCount": draft.tapCount,
+                            "delta": draft.delta,
+                            "note": firestoreNullable(draft.note),
+                            "occurredAt": Timestamp(date: draft.occurredAt),
+                        "location": [
+                                "lat": draft.location.lat,
+                                "lng": draft.location.lng,
+                                "addressText": firestoreNullable(draft.location.addressText)
+                            ],
+                            "media": draft.media.map { ["storagePath": $0.storagePath, "contentType": $0.contentType] },
+                            "createdAt": FieldValue.serverTimestamp(),
+                            "recordedAt": FieldValue.serverTimestamp(),
+                            "updatedAt": FieldValue.serverTimestamp()
+                        ], forDocument: eventRef)
+
+                        transaction.updateData([
+                            "loveBalance": FieldValue.increment(Int64(draft.delta)),
+                            "lastEventAt": Timestamp(date: nextLastEvent),
+                            "updatedAt": FieldValue.serverTimestamp()
+                        ], forDocument: groupRef)
+
+                        return eventRef.documentID
+                    } catch {
+                        errorPointer?.pointee = error as NSError
+                        return nil
                     }
+                }, completion: { value, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let eventID = value as? String {
+                        continuation.resume(returning: eventID)
+                    } else {
+                        continuation.resume(throwing: AppError.invalidGroupState)
+                    }
+                })
+            }
 
-                    let previousLastEvent = (groupData["lastEventAt"] as? Timestamp)?.dateValue() ?? draft.occurredAt
-                    let nextLastEvent = max(previousLastEvent, draft.occurredAt)
-
-                    let eventRef = eventId.map { groupRef.collection("events").document($0) }
-                        ?? groupRef.collection("events").document()
-                    transaction.setData([
-                        "createdBy": createdBy,
-                        "type": draft.type.rawValue,
-                        "tapCount": draft.tapCount,
-                        "delta": draft.delta,
-                        "note": firestoreNullable(draft.note),
-                        "occurredAt": Timestamp(date: draft.occurredAt),
-                    "location": [
-                            "lat": draft.location.lat,
-                            "lng": draft.location.lng,
-                            "addressText": firestoreNullable(draft.location.addressText)
-                        ],
-                        "media": draft.media.map { ["storagePath": $0.storagePath, "contentType": $0.contentType] },
-                        "createdAt": FieldValue.serverTimestamp(),
-                        "recordedAt": FieldValue.serverTimestamp(),
-                        "updatedAt": FieldValue.serverTimestamp()
-                    ], forDocument: eventRef)
-
-                    transaction.updateData([
-                        "loveBalance": FieldValue.increment(Int64(draft.delta)),
-                        "lastEventAt": Timestamp(date: nextLastEvent),
-                        "updatedAt": FieldValue.serverTimestamp()
-                    ], forDocument: groupRef)
-
-                    return eventRef.documentID
-                } catch {
-                    errorPointer?.pointee = error as NSError
-                    return nil
-                }
-            }, completion: { value, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let eventID = value as? String {
-                    continuation.resume(returning: eventID)
-                } else {
-                    continuation.resume(throwing: AppError.invalidGroupState)
-                }
-            })
+            return LoveEvent(
+                id: eventID,
+                createdBy: createdBy,
+                type: draft.type,
+                tapCount: draft.tapCount,
+                delta: draft.delta,
+                note: draft.note,
+                occurredAt: draft.occurredAt,
+                recordedAt: now,
+                location: draft.location,
+                media: draft.media,
+                createdAt: now,
+                updatedAt: now
+            )
         }
-
-        return LoveEvent(
-            id: eventID,
-            createdBy: createdBy,
-            type: draft.type,
-            tapCount: draft.tapCount,
-            delta: draft.delta,
-            note: draft.note,
-            occurredAt: draft.occurredAt,
-            recordedAt: now,
-            location: draft.location,
-            media: draft.media,
-            createdAt: now,
-            updatedAt: now
-        )
     }
 
     func fetchEvents(groupId: String, limit: Int) async throws -> [LoveEvent] {
-        let snapshot = try await db.collection("groups")
-            .document(groupId)
-            .collection("events")
-            .order(by: "occurredAt", descending: true)
-            .limit(to: limit)
-            .getDocuments()
+        try await withPerformanceTrace("event_fetch_history") {
+            let snapshot = try await db.collection("groups")
+                .document(groupId)
+                .collection("events")
+                .order(by: "occurredAt", descending: true)
+                .limit(to: limit)
+                .getDocuments()
 
-        return snapshot.documents.compactMap { $0.toLoveEvent() }
+            return snapshot.documents.compactMap { $0.toLoveEvent() }
+        }
     }
 
     func appendMedia(groupId: String, eventId: String, media: EventMedia) async throws {
@@ -499,30 +514,32 @@ final class FirebaseStorageMediaService: MediaServicing {
     }
 
     func uploadImageData(_ data: Data, groupId: String, eventId: String, fileExtension: String) async throws -> EventMedia {
-        guard data.count <= Self.maxAcceptedInputBytes else {
-            throw AppError.imageTooLargeForUpload
-        }
+        try await withPerformanceTrace("storage_upload_image") {
+            guard data.count <= Self.maxAcceptedInputBytes else {
+                throw AppError.imageTooLargeForUpload
+            }
 
-        let prepared = try prepareUpload(data: data, preferredExtension: fileExtension)
-        let filename = "\(UUID().uuidString).\(prepared.fileExtension)"
-        let path = "groups/\(groupId)/events/\(eventId)/\(filename)"
-        let ref = storage.reference(withPath: path)
-        let metadata = StorageMetadata()
-        metadata.contentType = prepared.contentType
+            let prepared = try prepareUpload(data: data, preferredExtension: fileExtension)
+            let filename = "\(UUID().uuidString).\(prepared.fileExtension)"
+            let path = "groups/\(groupId)/events/\(eventId)/\(filename)"
+            let ref = storage.reference(withPath: path)
+            let metadata = StorageMetadata()
+            metadata.contentType = prepared.contentType
 
-        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<StorageMetadata, Error>) in
-            ref.putData(prepared.data, metadata: metadata) { metadata, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let metadata {
-                    continuation.resume(returning: metadata)
-                } else {
-                    continuation.resume(throwing: AppError.imageTooLargeForUpload)
+            _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<StorageMetadata, Error>) in
+                ref.putData(prepared.data, metadata: metadata) { metadata, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let metadata {
+                        continuation.resume(returning: metadata)
+                    } else {
+                        continuation.resume(throwing: AppError.imageTooLargeForUpload)
+                    }
                 }
             }
-        }
 
-        return EventMedia(storagePath: path, contentType: prepared.contentType)
+            return EventMedia(storagePath: path, contentType: prepared.contentType)
+        }
     }
 
     private func prepareUpload(data: Data, preferredExtension: String) throws -> (data: Data, contentType: String, fileExtension: String) {
@@ -633,6 +650,23 @@ extension FirebaseMessagingService: MessagingDelegate {
 
 private func firestoreNullable(_ value: String?) -> Any {
     value ?? NSNull()
+}
+
+private func withPerformanceTrace<T>(
+    _ name: String,
+    _ operation: () async throws -> T
+) async throws -> T {
+    let trace = Performance.startTrace(name: name)
+    do {
+        let value = try await operation()
+        trace?.setValue("ok", forAttribute: "status")
+        trace?.stop()
+        return value
+    } catch {
+        trace?.setValue("error", forAttribute: "status")
+        trace?.stop()
+        throw error
+    }
 }
 
 private extension DocumentSnapshot {

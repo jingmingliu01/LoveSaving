@@ -75,7 +75,7 @@ struct JourneyView: View {
             .background(.ultraThinMaterial)
             .accessibilityIdentifier("journey.modePicker")
         }
-        .task {
+        .task(id: session.group?.id) {
             await session.refreshEvents()
             if let first = session.events.first {
                 cameraPosition = .region(

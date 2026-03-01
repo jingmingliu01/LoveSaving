@@ -13,6 +13,8 @@
 		C10000000000000000000025 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000015 /* FirebaseMessaging */; };
 		C10000000000000000000026 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000016 /* FirebaseFunctions */; };
 		C10000000000000000000027 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000017 /* FirebaseStorage */; };
+		C10000000000000000000028 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000018 /* FirebaseCrashlytics */; };
+		C10000000000000000000029 /* FirebasePerformance in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000019 /* FirebasePerformance */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -66,6 +68,8 @@
 				C10000000000000000000023 /* FirebaseFirestore in Frameworks */,
 				C10000000000000000000026 /* FirebaseFunctions in Frameworks */,
 				C10000000000000000000025 /* FirebaseMessaging in Frameworks */,
+				C10000000000000000000028 /* FirebaseCrashlytics in Frameworks */,
+				C10000000000000000000029 /* FirebasePerformance in Frameworks */,
 				C10000000000000000000027 /* FirebaseStorage in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -132,6 +136,8 @@
 				C10000000000000000000013 /* FirebaseFirestore */,
 				C10000000000000000000016 /* FirebaseFunctions */,
 				C10000000000000000000015 /* FirebaseMessaging */,
+				C10000000000000000000018 /* FirebaseCrashlytics */,
+				C10000000000000000000019 /* FirebasePerformance */,
 				C10000000000000000000017 /* FirebaseStorage */,
 			);
 			productName = LoveSaving;
@@ -668,6 +674,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseStorage;
+		};
+		C10000000000000000000018 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
+		};
+		C10000000000000000000019 /* FirebasePerformance */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C10000000000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebasePerformance;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

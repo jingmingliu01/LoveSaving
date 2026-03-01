@@ -1,0 +1,32 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isGroupParticipant(groupId) {
+      let group = firestore.get(/databases/(default)/documents/groups/$(groupId));
+      return isSignedIn()
+        && group.data.memberIds is list
+        && request.auth.uid in group.data.memberIds;
+    }
+
+    function isActiveGroupMember(groupId) {
+      let group = firestore.get(/databases/(default)/documents/groups/$(groupId));
+      return isGroupParticipant(groupId)
+        && group.data.status == "active";
+    }
+
+    function isValidImageUpload() {
+      return request.resource != null
+        && request.resource.size <= 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|heic|heif|webp)');
+    }
+
+    match /groups/{groupId}/events/{eventId}/{allPaths=**} {
+      allow read: if isGroupParticipant(groupId);
+      allow write: if isActiveGroupMember(groupId) && isValidImageUpload();
+    }
+  }
+}

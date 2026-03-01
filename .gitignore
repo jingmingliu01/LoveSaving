@@ -1,0 +1,44 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+Packages/
+.swiftpm/
+
+# Xcode build outputs
+DerivedData/
+build/
+*/build/
+
+# Xcode user-specific files
+xcuserdata/
+*.xcuserstate
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Xcode SCM metadata
+*.xccheckout
+*.xcscmblueprint
+
+# Optional dependency manager build artifacts
+Carthage/Build/
+
+# Local machine secrets/config
+.netrc
+LoveSaving/Config/GoogleService-Info.plist
+LoveSaving/Config/GoogleService-Info.*.plist
+!LoveSaving/Config/GoogleService-Info.sample.plist
+
+# Firebase local artifacts
+Firebase/functions/node_modules/
+Firebase/firepit-log.txt
+Firebase/.firebase/
+Firebase/functions/.env*
+Firebase/functions/.runtimeconfig.json
+
+# Test outputs
+*.xcresult

@@ -47,7 +47,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          MERGE_BASE="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          CHANGED="$(git diff --name-only "$MERGE_BASE" "$HEAD_SHA")"
           echo "$CHANGED"
           if echo "$CHANGED" | grep -Eq '^Firebase/(firestore\.rules|storage\.rules|firestore\.indexes\.json|firebase\.json|functions/)'; then
             echo "firebase_changed=true" >> "$GITHUB_OUTPUT"

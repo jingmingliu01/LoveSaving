@@ -159,12 +159,19 @@ service cloud.firestore {
     // Self updates are limited to user-facing fields; system fields are immutable.
     function validUserSelfUpdate() {
       let d = request.resource.data;
+      let changed = d.diff(resource.data).affectedKeys();
       return validUserData(d)
-        && d.diff(resource.data).affectedKeys().hasOnly(["displayName", "photoURL", "fcmToken", "updatedAt"])
+        && changed.hasOnly(["displayName", "photoURL", "fcmToken", "updatedAt", "createdAt", "emailLower"])
         && d.updatedAt == request.time
-        && d.createdAt == resource.data.createdAt
+        && (
+          (resource.data.createdAt is timestamp && d.createdAt == resource.data.createdAt)
+          || (!(resource.data.createdAt is timestamp) && d.createdAt == request.time)
+        )
         && d.email == resource.data.email
-        && d.emailLower == resource.data.emailLower
+        && (
+          (resource.data.emailLower is string && d.emailLower == resource.data.emailLower)
+          || (!(resource.data.emailLower is string) && d.emailLower == d.email.lower())
+        )
         && d.currentGroupId == resource.data.currentGroupId;
     }
 
@@ -175,22 +182,31 @@ service cloud.firestore {
         && d.fromUid is string
         && d.toUid is string
         && d.fromUid != d.toUid
-        && isNullableString(d.fromDisplayName)
-        && isNullableString(d.fromEmail)
+        && (!d.keys().hasAny(["fromDisplayName"]) || isNullableString(d.fromDisplayName))
+        && (!d.keys().hasAny(["fromEmail"]) || isNullableString(d.fromEmail))
         && d.status == "pending"
         && d.createdAt == request.time
-        && (d.expiresAt == null || d.expiresAt is timestamp)
-        && d.respondedAt == null;
+        && (!d.keys().hasAny(["expiresAt"]) || d.expiresAt == null || d.expiresAt is timestamp)
+        && (!d.keys().hasAny(["respondedAt"]) || d.respondedAt == null);
     }
 
     function validInviteUpdate() {
       let d = request.resource.data;
-      return d.keys().hasOnly(["fromUid", "fromDisplayName", "fromEmail", "toUid", "status", "createdAt", "respondedAt", "expiresAt"])
-        && d.diff(resource.data).affectedKeys().hasOnly(["status", "respondedAt"])
+      let changed = d.diff(resource.data).affectedKeys();
+      return d.keys().hasAll(["fromUid", "toUid", "status", "createdAt"])
+        && changed.hasOnly(["status", "respondedAt"])
         && d.fromUid == resource.data.fromUid
         && d.toUid == resource.data.toUid
-        && d.fromDisplayName == resource.data.fromDisplayName
-        && d.fromEmail == resource.data.fromEmail
+        && isNullableString(d.fromDisplayName)
+        && isNullableString(d.fromEmail)
+        && (
+          (resource.data.fromDisplayName is string && d.fromDisplayName == resource.data.fromDisplayName)
+          || (!(resource.data.fromDisplayName is string) && d.fromDisplayName == null)
+        )
+        && (
+          (resource.data.fromEmail is string && d.fromEmail == resource.data.fromEmail)
+          || (!(resource.data.fromEmail is string) && d.fromEmail == null)
+        )
         && d.createdAt == resource.data.createdAt
         && d.expiresAt == resource.data.expiresAt
         && d.respondedAt == request.time

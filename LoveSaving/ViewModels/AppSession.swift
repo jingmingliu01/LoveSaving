@@ -38,7 +38,7 @@ final class AppSession: ObservableObject {
     }
 
     func signUp(email: String, password: String, displayName: String) async {
-        await runBusyTask { [self] in
+        await runBusyTask(source: "auth.signUp") { [self] in
             let user = try await container.authService.signUp(email: email, password: password, displayName: displayName)
             let now = Date()
             let profile = UserProfile(
@@ -54,7 +54,7 @@ final class AppSession: ObservableObject {
     }
 
     func signIn(email: String, password: String) async {
-        await runBusyTask { [self] in
+        await runBusyTask(source: "auth.signIn") { [self] in
             let user = try await container.authService.signIn(email: email, password: password)
             _ = try await ensureProfileExists(for: user)
             try await refreshForAuthUser(user)
@@ -69,19 +69,20 @@ final class AppSession: ObservableObject {
             group = nil
             inboundInvites = []
             events = []
+            globalErrorMessage = nil
         } catch {
-            globalErrorMessage = error.localizedDescription
+            handleError(error, source: "auth.signOut", presentToUser: true)
         }
     }
 
     func changePassword(_ newPassword: String) async {
-        await runBusyTask { [self] in
+        await runBusyTask(source: "auth.changePassword") { [self] in
             try await container.authService.changePassword(newPassword: newPassword)
         }
     }
 
     func changeDisplayName(_ newDisplayName: String) async {
-        await runBusyTask { [self] in
+        await runBusyTask(source: "profile.changeDisplayName") { [self] in
             guard var currentProfile = profile else {
                 throw AppError.userNotFound
             }
@@ -102,17 +103,17 @@ final class AppSession: ObservableObject {
     func refreshInvites() async {
         guard let uid = authUser?.uid else { return }
         do {
+            try await container.authService.ensureSessionReady()
             inboundInvites = try await fetchActiveInboundInvites(for: uid)
         } catch {
-            globalErrorMessage = error.localizedDescription
+            handleError(error, source: "invite.refresh", presentToUser: true)
         }
     }
 
     func sendInvite(to identifier: String) async {
-        await runBusyTask { [self] in
-            guard let currentUser = authUser else {
-                throw AppError.missingAuthUser
-            }
+        await runBusyTask(source: "invite.send") { [self] in
+            try await container.authService.ensureSessionReady()
+            let currentUser = try await resolvedAuthUser()
 
             guard let targetUID = try await container.userDataService.resolveUserID(identifier: identifier) else {
                 throw AppError.userNotFound
@@ -130,12 +131,17 @@ final class AppSession: ObservableObject {
                 fromEmail: profile?.email ?? currentUser.email
             )
 
-            try await refreshForAuthUser(currentUser)
+            // Post-send refresh should never mask a successful send.
+            do {
+                inboundInvites = try await fetchActiveInboundInvites(for: currentUser.uid)
+            } catch {
+                handleError(error, source: "invite.send.postRefresh", presentToUser: false)
+            }
         }
     }
 
     func respond(invite: Invite, accept: Bool) async {
-        await runBusyTask { [self] in
+        await runBusyTask(source: "invite.respond") { [self] in
             let respondedAt = Date()
             if let expiresAt = invite.expiresAt, expiresAt <= respondedAt {
                 try await container.inviteService.respondInvite(
@@ -190,7 +196,7 @@ final class AppSession: ObservableObject {
         coordinate: CLLocationCoordinate2D?,
         addressText: String?
     ) async -> Bool {
-        await runBusyTask { [self] in
+        await runBusyTask(source: "event.submitTapBurst") { [self] in
             guard tapCount > 0 else {
                 throw AppError.emptyTapBurst
             }
@@ -256,12 +262,12 @@ final class AppSession: ObservableObject {
         do {
             events = try await container.eventService.fetchEvents(groupId: group.id, limit: 200)
         } catch {
-            globalErrorMessage = error.localizedDescription
+            handleError(error, source: "event.refresh", presentToUser: true)
         }
     }
 
     func softUnlinkCurrentGroup() async {
-        await runBusyTask { [self] in
+        await runBusyTask(source: "group.softUnlink") { [self] in
             guard let group else {
                 throw AppError.missingGroup
             }
@@ -273,12 +279,16 @@ final class AppSession: ObservableObject {
         }
     }
 
-    func requestNotifications() async {
+    func requestNotifications(suppressErrors: Bool = false) async {
         do {
             try await container.messagingService.requestNotificationAuthorization()
             try await container.messagingService.scheduleDailyReflectionReminder()
         } catch {
-            globalErrorMessage = error.localizedDescription
+            handleError(
+                error,
+                source: "notifications.request",
+                presentToUser: !suppressErrors
+            )
         }
     }
 
@@ -298,7 +308,7 @@ final class AppSession: ObservableObject {
                         events = []
                     }
                 } catch {
-                    globalErrorMessage = error.localizedDescription
+                    handleError(error, source: "auth.observe", presentToUser: true)
                 }
             }
         }
@@ -313,13 +323,14 @@ final class AppSession: ObservableObject {
                 do {
                     try await container.userDataService.updateFcmToken(uid: uid, token: token)
                 } catch {
-                    globalErrorMessage = error.localizedDescription
+                    handleError(error, source: "messaging.tokenUpload", presentToUser: false)
                 }
             }
         }
     }
 
     private func refreshForAuthUser(_ user: AuthUser) async throws {
+        try await container.authService.ensureSessionReady()
         authUser = user
 
         let profile = try await ensureProfileExists(for: user)
@@ -374,15 +385,37 @@ final class AppSession: ObservableObject {
         )
         try await container.userDataService.upsertUser(fallbackProfile)
 
-        if let created = try await container.userDataService.fetchUser(uid: user.uid) {
-            return created
+        // Firestore server timestamps can take a short moment to become readable.
+        for attempt in 0..<5 {
+            if let created = try await container.userDataService.fetchUser(uid: user.uid) {
+                return created
+            }
+            if attempt < 4 {
+                let delay = UInt64((attempt + 1) * 150_000_000)
+                try await Task.sleep(nanoseconds: delay)
+            }
         }
 
-        throw AppError.userNotFound
+        throw AppError.profileNotReady
+    }
+
+    private func resolvedAuthUser() async throws -> AuthUser {
+        if let current = authUser {
+            return current
+        }
+        if let current = container.authService.currentUser {
+            try await refreshForAuthUser(current)
+            return current
+        }
+        throw AppError.missingAuthUser
     }
 
     @discardableResult
-    private func runBusyTask(_ operation: @escaping () async throws -> Void) async -> Bool {
+    private func runBusyTask(
+        source: String,
+        _ operation: @escaping () async throws -> Void
+    ) async -> Bool {
+        globalErrorMessage = nil
         isBusy = true
         defer {
             isBusy = false
@@ -392,11 +425,18 @@ final class AppSession: ObservableObject {
             try await operation()
             return true
         } catch {
-            if !(error is AppError) {
-                Crashlytics.crashlytics().record(error: error)
-            }
-            globalErrorMessage = error.localizedDescription
+            handleError(error, source: source, presentToUser: true)
             return false
+        }
+    }
+
+    private func handleError(_ error: Error, source: String, presentToUser: Bool) {
+        if !(error is AppError) {
+            Crashlytics.crashlytics().record(error: error)
+        }
+        print("[AppSession][\(source)] \(error.localizedDescription)")
+        if presentToUser {
+            globalErrorMessage = error.localizedDescription
         }
     }
 }

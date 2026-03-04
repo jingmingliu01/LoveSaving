@@ -8,13 +8,13 @@ struct LoveSavingApp: App {
     private let container: AppContainer
 
     init() {
-        let isUITestMode = ProcessInfo.processInfo.environment["LOVEBANK_MODE"] == "UI_TEST"
-        if !isUITestMode, FirebaseApp.app() == nil {
+        let runtimeMode = AppContainer.runtimeModeForCurrentProcess()
+        if case .live = runtimeMode, FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
-
-        let resolvedContainer = AppContainer.forCurrentProcess()
+        let resolvedContainer = AppContainer.make(runtimeMode: runtimeMode)
         self.container = resolvedContainer
+
         let resolvedLocationManager = LocationManager(isUITestMode: resolvedContainer.isUITestMode)
         if resolvedContainer.isUITestMode {
             resolvedLocationManager.setMockLocationForUITests()
@@ -32,7 +32,7 @@ struct LoveSavingApp: App {
                 .task {
                     guard !container.isUITestMode else { return }
                     locationManager.requestAuthorizationIfNeeded()
-                    await session.requestNotifications()
+                    await session.requestNotifications(suppressErrors: true)
                 }
         }
     }

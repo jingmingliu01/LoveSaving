@@ -39,6 +39,24 @@ final class FirebaseAuthService: AuthServicing {
         }
     }
 
+    func ensureSessionReady() async throws {
+        guard let user = auth.currentUser else {
+            throw AppError.missingAuthUser
+        }
+
+        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthTokenResult, Error>) in
+            user.getIDTokenResult(forcingRefresh: false) { tokenResult, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let tokenResult {
+                    continuation.resume(returning: tokenResult)
+                } else {
+                    continuation.resume(throwing: AppError.missingAuthUser)
+                }
+            }
+        }
+    }
+
     func signUp(email: String, password: String, displayName: String) async throws -> AuthUser {
         try await withPerformanceTrace("auth_sign_up") {
             let result: AuthDataResult = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
@@ -126,7 +144,7 @@ final class FirebaseUserDataService: UserDataServicing {
             let batch = db.batch()
 
             if snapshot.exists {
-                batch.setData([
+                var payload: [String: Any] = [
                     "displayName": user.displayName,
                     "email": user.email,
                     "emailLower": emailLower,
@@ -134,7 +152,14 @@ final class FirebaseUserDataService: UserDataServicing {
                     "currentGroupId": firestoreNullable(user.currentGroupId),
                     "updatedAt": FieldValue.serverTimestamp(),
                     "fcmToken": firestoreNullable(user.fcmToken)
-                ], forDocument: userRef, merge: true)
+                ]
+
+                // Backfill legacy docs so strict rules and profile decoding remain stable.
+                if snapshot.data()?["createdAt"] == nil {
+                    payload["createdAt"] = FieldValue.serverTimestamp()
+                }
+
+                batch.setData(payload, forDocument: userRef, merge: true)
             } else {
                 batch.setData([
                     "displayName": user.displayName,
@@ -234,9 +259,11 @@ final class FirebaseUserDataService: UserDataServicing {
 @MainActor
 final class FirebaseInviteService: InviteServicing {
     private let db: Firestore
+    private let auth: Auth
 
-    init(db: Firestore = .firestore()) {
+    init(db: Firestore = .firestore(), auth: Auth = .auth()) {
         self.db = db
+        self.auth = auth
     }
 
     func sendInvite(
@@ -246,6 +273,10 @@ final class FirebaseInviteService: InviteServicing {
         fromDisplayName: String?,
         fromEmail: String?
     ) async throws -> Invite {
+        guard let authUID = auth.currentUser?.uid, authUID == fromUid else {
+            throw AppError.missingAuthUser
+        }
+
         let ref = db.collection("invites").document()
         let createdAt = Date()
         let invite = Invite(
@@ -671,13 +702,19 @@ private func withPerformanceTrace<T>(
 
 private extension DocumentSnapshot {
     func toUserProfile() -> UserProfile? {
-        guard let data = data(),
+        // Use estimated server timestamps to avoid transient nils right after writes.
+        let resolvedData = data(with: .estimate) ?? data()
+        guard let data = resolvedData,
               let displayName = data["displayName"] as? String,
-              let email = data["email"] as? String,
-              let createdAt = (data["createdAt"] as? Timestamp)?.dateValue(),
-              let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() else {
+              let email = data["email"] as? String else {
             return nil
         }
+
+        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
+            ?? (data["updatedAt"] as? Timestamp)?.dateValue()
+            ?? Date()
+        let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue()
+            ?? createdAt
 
         return UserProfile(
             id: documentID,

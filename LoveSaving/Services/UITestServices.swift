@@ -143,6 +143,12 @@ final class UITestAuthService: AuthServicing {
         return stream
     }
 
+    func ensureSessionReady() async throws {
+        guard store.authUser != nil else {
+            throw AppError.missingAuthUser
+        }
+    }
+
     func signUp(email: String, password: String, displayName: String) async throws -> AuthUser {
         let uid = "user_\(UUID().uuidString.prefix(8))"
         let user = AuthUser(uid: uid, email: email, displayName: displayName)

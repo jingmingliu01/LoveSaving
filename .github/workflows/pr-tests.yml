@@ -7,29 +7,67 @@ on:
 jobs:
   ios-tests:
     name: iOS Tests
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Select Xcode 26.3
+        run: |
+          set -euo pipefail
+          if [ -d /Applications/Xcode_26.3.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          elif [ -d /Applications/Xcode_26.3_Release_Candidate_2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.3_Release_Candidate_2.app/Contents/Developer
+          else
+            echo "Xcode 26.3 not found. Available Xcodes:"
+            ls -1 /Applications | grep '^Xcode' || true
+            exit 1
+          fi
+          xcodebuild -version
 
       - name: Run unit tests
         run: |
+          mkdir -p TestResults
           xcodebuild test \
             -project LoveSaving.xcodeproj \
             -scheme LoveSaving \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'platform=iOS Simulator,OS=26.2,name=iPhone 17' \
+            -resultBundlePath "$GITHUB_WORKSPACE/TestResults/unit-tests.xcresult" \
             -only-testing:LoveSavingTests
 
       - name: Run UI smoke tests
         run: |
+          mkdir -p TestResults
           xcodebuild test \
             -project LoveSaving.xcodeproj \
             -scheme LoveSaving \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'platform=iOS Simulator,OS=26.2,name=iPhone 17' \
+            -resultBundlePath "$GITHUB_WORKSPACE/TestResults/ui-smoke-tests.xcresult" \
+            -parallel-testing-enabled NO \
             -only-testing:LoveSavingUITests/RootFlowSmokeUITests
+
+      - name: Collect crash reports
+        if: always()
+        run: |
+          mkdir -p TestResults/crash-reports
+          if [ -d "$HOME/Library/Logs/DiagnosticReports" ]; then
+            find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f \( -name '*.crash' -o -name '*.ips' \) -print -exec cp -n {} TestResults/crash-reports/ \;
+          fi
+          if [ -d "$HOME/Library/Developer/CoreSimulator/Devices" ]; then
+            find "$HOME/Library/Developer/CoreSimulator/Devices" -type f -path '*/data/Library/Logs/CrashReporter/*' \( -name '*.crash' -o -name '*.ips' \) -print -exec cp -n {} TestResults/crash-reports/ \;
+          fi
+
+      - name: Upload iOS test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            TestResults/**/*.xcresult
+            TestResults/crash-reports/**
 
   firebase-change-gate:
     name: Firebase Change Gate

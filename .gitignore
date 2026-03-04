@@ -42,3 +42,6 @@ Firebase/functions/.runtimeconfig.json
 
 # Test outputs
 *.xcresult
+TestResults/
+*.crash
+*.ips

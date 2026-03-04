@@ -19,6 +19,9 @@ final class RootFlowSmokeUITests: XCTestCase {
 
     private func launchApp(scenario: String) -> XCUIApplication {
         let app = XCUIApplication()
+        if app.state != .notRunning {
+            app.terminate()
+        }
         app.launchEnvironment["LOVEBANK_MODE"] = "UI_TEST"
         app.launchEnvironment["LOVEBANK_SCENARIO"] = scenario
         app.launch()

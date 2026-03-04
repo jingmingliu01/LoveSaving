@@ -10,6 +10,7 @@ enum AppError: LocalizedError {
     case missingAuthUser
     case missingGroup
     case userNotFound
+    case profileNotReady
     case invalidInviteState
     case invalidGroupState
     case locationUnavailable
@@ -24,6 +25,8 @@ enum AppError: LocalizedError {
             return "Please link with your partner first."
         case .userNotFound:
             return "Recipient user was not found."
+        case .profileNotReady:
+            return "Your profile is still initializing. Please try again."
         case .invalidInviteState:
             return "Invite is no longer pending."
         case .invalidGroupState:
@@ -42,6 +45,7 @@ enum AppError: LocalizedError {
 protocol AuthServicing {
     var currentUser: AuthUser? { get }
     func authStateStream() -> AsyncStream<AuthUser?>
+    func ensureSessionReady() async throws
     func signUp(email: String, password: String, displayName: String) async throws -> AuthUser
     func signIn(email: String, password: String) async throws -> AuthUser
     func signOut() throws

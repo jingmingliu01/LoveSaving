@@ -54,14 +54,34 @@ struct AppContainer {
         runtimeMode: .live
     )
 
-    static func forCurrentProcess() -> AppContainer {
-        let env = ProcessInfo.processInfo.environment
-        guard env["LOVEBANK_MODE"] == "UI_TEST" else {
+    static func runtimeModeForCurrentProcess(environment: [String: String] = ProcessInfo.processInfo.environment) -> AppRuntimeMode {
+        if environment["LOVEBANK_MODE"] == "LIVE" {
             return .live
         }
 
-        let scenario = UITestScenario(rawValue: env["LOVEBANK_SCENARIO"] ?? "") ?? .linked
-        return .uiTest(scenario: scenario)
+        if environment["LOVEBANK_MODE"] == "UI_TEST" {
+            let scenario = UITestScenario(rawValue: environment["LOVEBANK_SCENARIO"] ?? "") ?? .linked
+            return .uiTest(scenario)
+        }
+
+        if isRunningUnderTests(environment: environment) {
+            return .uiTest(.linked)
+        }
+
+        return .live
+    }
+
+    static func make(runtimeMode: AppRuntimeMode) -> AppContainer {
+        switch runtimeMode {
+        case .live:
+            return .live
+        case .uiTest(let scenario):
+            return .uiTest(scenario: scenario)
+        }
+    }
+
+    static func forCurrentProcess() -> AppContainer {
+        make(runtimeMode: runtimeModeForCurrentProcess())
     }
 
     static func uiTest(scenario: UITestScenario) -> AppContainer {
@@ -77,5 +97,15 @@ struct AppContainer {
             messagingService: UITestMessagingService(),
             runtimeMode: .uiTest(scenario)
         )
+    }
+
+    private static func isRunningUnderTests(environment: [String: String]) -> Bool {
+        if environment["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+        if environment["XCTestBundlePath"] != nil {
+            return true
+        }
+        return NSClassFromString("XCTestCase") != nil
     }
 }

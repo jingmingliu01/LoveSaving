@@ -77,7 +77,7 @@ jobs:
         run: |
           test -s Firebase/firestore.rules
           test -s Firebase/storage.rules
-          rg "rules_version\s*=\s*'2'" Firebase/firestore.rules Firebase/storage.rules
+          grep -E "rules_version\s*=\s*'2'" Firebase/firestore.rules Firebase/storage.rules
 
       - name: Validate Cloud Functions syntax and installability
         if: steps.detect.outputs.firebase_changed == 'true'

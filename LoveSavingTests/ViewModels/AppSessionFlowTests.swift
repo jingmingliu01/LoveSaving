@@ -35,7 +35,9 @@ final class AppSessionFlowTests: XCTestCase {
 
     func testAcceptInviteLinksGroup() async {
         let session = makeSession(scenario: .unlinked)
-        await settleAuthObserver()
+        await waitUntil("auth observer loads inbound invite") {
+            session.isSignedIn && !session.inboundInvites.isEmpty
+        }
 
         guard let invite = session.inboundInvites.first else {
             XCTFail("Expected seeded invite")
@@ -51,7 +53,9 @@ final class AppSessionFlowTests: XCTestCase {
 
     func testSubmitTapBurstWithImageAddsEventMedia() async {
         let session = makeSession(scenario: .linked)
-        await settleAuthObserver()
+        await waitUntil("auth observer loads linked group") {
+            session.isSignedIn && session.group != nil
+        }
 
         let result = await session.submitTapBurst(
             tapCount: 3,
@@ -70,6 +74,9 @@ final class AppSessionFlowTests: XCTestCase {
 
     func testSubmitTapBurstWithoutCoordinateFails() async {
         let session = makeSession(scenario: .linked)
+        await waitUntil("auth observer loads linked group") {
+            session.isSignedIn && session.group != nil
+        }
 
         let result = await session.submitTapBurst(
             tapCount: 2,
@@ -88,8 +95,20 @@ final class AppSessionFlowTests: XCTestCase {
         AppSession(container: .uiTest(scenario: scenario))
     }
 
-    private func settleAuthObserver() async {
-        await Task.yield()
-        try? await Task.sleep(nanoseconds: 50_000_000)
+    private func waitUntil(
+        _ description: String,
+        timeoutNanoseconds: UInt64 = 1_000_000_000,
+        condition: @escaping @MainActor () -> Bool
+    ) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now + .nanoseconds(Int64(timeoutNanoseconds))
+        while clock.now < deadline {
+            if condition() {
+                return
+            }
+            await Task.yield()
+        }
+
+        XCTFail("Timed out waiting for condition: \(description)")
     }
 }

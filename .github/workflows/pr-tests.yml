@@ -1,0 +1,86 @@
+name: PR Tests
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ios-tests:
+    name: iOS Tests
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Run unit tests
+        run: |
+          xcodebuild test \
+            -project LoveSaving.xcodeproj \
+            -scheme LoveSaving \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -only-testing:LoveSavingTests
+
+      - name: Run UI smoke tests
+        run: |
+          xcodebuild test \
+            -project LoveSaving.xcodeproj \
+            -scheme LoveSaving \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -only-testing:LoveSavingUITests/RootFlowSmokeUITests
+
+  firebase-change-gate:
+    name: Firebase Change Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Firebase changes
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -Eq '^Firebase/(firestore\.rules|storage\.rules|firestore\.indexes\.json|firebase\.json|functions/)'; then
+            echo "firebase_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "firebase_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip heavy Firebase checks when no Firebase files changed
+        if: steps.detect.outputs.firebase_changed != 'true'
+        run: echo "No Firebase config/rules/functions changes detected."
+
+      - name: Setup Node.js
+        if: steps.detect.outputs.firebase_changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate Firebase JSON files
+        if: steps.detect.outputs.firebase_changed == 'true'
+        run: |
+          jq empty Firebase/firebase.json
+          jq empty Firebase/firestore.indexes.json
+
+      - name: Validate Firebase rules files
+        if: steps.detect.outputs.firebase_changed == 'true'
+        run: |
+          test -s Firebase/firestore.rules
+          test -s Firebase/storage.rules
+          rg "rules_version\s*=\s*'2'" Firebase/firestore.rules Firebase/storage.rules
+
+      - name: Validate Cloud Functions syntax and installability
+        if: steps.detect.outputs.firebase_changed == 'true'
+        working-directory: Firebase/functions
+        run: |
+          npm ci
+          node --check index.js

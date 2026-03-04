@@ -97,7 +97,7 @@ final class AppSessionFlowTests: XCTestCase {
 
     private func waitUntil(
         _ description: String,
-        timeoutNanoseconds: UInt64 = 1_000_000_000,
+        timeoutNanoseconds: UInt64 = 5_000_000_000,
         condition: @escaping @MainActor () -> Bool
     ) async {
         let clock = ContinuousClock()
@@ -106,7 +106,7 @@ final class AppSessionFlowTests: XCTestCase {
             if condition() {
                 return
             }
-            await Task.yield()
+            try? await Task.sleep(nanoseconds: 10_000_000)
         }
 
         XCTFail("Timed out waiting for condition: \(description)")

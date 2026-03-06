@@ -1,5 +1,6 @@
 import FirebaseCore
 import SwiftUI
+import FirebaseFirestore
 
 @main
 struct LoveSavingApp: App {
@@ -11,7 +12,9 @@ struct LoveSavingApp: App {
     init() {
         let runtimeMode = AppContainer.runtimeModeForCurrentProcess()
         if case .live = runtimeMode, FirebaseApp.app() == nil {
+            FirebaseConfiguration.shared.setLoggerLevel(.debug) 
             FirebaseApp.configure()
+            
         }
         let resolvedContainer = AppContainer.make(runtimeMode: runtimeMode)
         self.container = resolvedContainer

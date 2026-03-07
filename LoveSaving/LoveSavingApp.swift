@@ -1,6 +1,17 @@
 import FirebaseCore
 import SwiftUI
-import FirebaseFirestore
+
+private enum FirebaseLoggerMode: String {
+    case none
+    case firebase
+
+    init(environment: [String: String]) {
+        let value = environment["LOVESAVING_LOGGER"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        self = FirebaseLoggerMode(rawValue: value ?? "") ?? .none
+    }
+}
 
 @main
 struct LoveSavingApp: App {
@@ -10,11 +21,22 @@ struct LoveSavingApp: App {
     private let container: AppContainer
 
     init() {
+        let environment = ProcessInfo.processInfo.environment
         let runtimeMode = AppContainer.runtimeModeForCurrentProcess()
+
+        #if DEBUG
+        let loggerMode = FirebaseLoggerMode(environment: environment)
+        #else
+        let loggerMode: FirebaseLoggerMode = .none
+        #endif
+
         if case .live = runtimeMode, FirebaseApp.app() == nil {
-            FirebaseConfiguration.shared.setLoggerLevel(.debug) 
+            // Supported values for LOVESAVING_LOGGER: none, firebase.
+            if loggerMode == .firebase {
+                FirebaseConfiguration.shared.setLoggerLevel(.debug)
+            }
+
             FirebaseApp.configure()
-            
         }
         let resolvedContainer = AppContainer.make(runtimeMode: runtimeMode)
         self.container = resolvedContainer

@@ -176,7 +176,7 @@ final class AppSession: ObservableObject {
                 )
                 _ = try await container.groupService.createGroupAndLinkUsers(
                     invite: acceptedInvite,
-                    groupName: "LoveBank Group"
+                    groupName: "LoveSaving Group"
                 )
             }
 
@@ -377,7 +377,7 @@ final class AppSession: ObservableObject {
         let now = Date()
         let fallbackProfile = UserProfile(
             id: user.uid,
-            displayName: user.displayName ?? "LoveBank User",
+            displayName: user.displayName ?? "LoveSaving User",
             email: user.email,
             currentGroupId: nil,
             createdAt: now,

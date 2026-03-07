@@ -1,4 +1,4 @@
-# LoveBank Firebase Security Audit Checklist
+# LoveSaving Firebase Security Audit Checklist
 
 Last updated: 2026-02-26
 Scope: Firestore rules, Storage rules, and callable function access model

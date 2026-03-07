@@ -1,7 +1,7 @@
 # ARCHIVE: Firebase Database Specification v3 (Firestore + Storage)
 
 > Archive status: This document is a historical design snapshot and is not the current source of truth.
-> Current live spec: `/Users/jimmy/Desktop/LoveBank/Firebase/docs/DB_SPEC_2026-02-26.md`
+> Current live spec: `/Users/jimmy/Desktop/LoveSaving/Firebase/docs/DB_SPEC_2026-02-26.md`
 
 ## 1. Scope
 This specification defines the Firestore and Storage data model for an iOS app where the product is **usable only after two users link into a single Group**. All core data is Group-scoped.

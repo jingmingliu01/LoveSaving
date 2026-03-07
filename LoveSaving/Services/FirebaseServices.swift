@@ -193,7 +193,7 @@ final class FirebaseUserDataService: UserDataServicing {
             let now = Date()
             return UserProfile(
                 id: resolved.uid,
-                displayName: resolved.displayName ?? "LoveBank User",
+                displayName: resolved.displayName ?? "LoveSaving User",
                 email: resolved.email ?? email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
                 currentGroupId: nil,
                 createdAt: now,
@@ -657,7 +657,7 @@ final class FirebaseMessagingService: NSObject, MessagingServicing {
     func scheduleDailyReflectionReminder() async throws {
         #if canImport(UIKit)
         let content = UNMutableNotificationContent()
-        content.title = "LoveBank Reminder"
+        content.title = "LoveSaving Reminder"
         content.body = "Take a moment to reflect and log a meaningful moment today."
         content.sound = .default
 

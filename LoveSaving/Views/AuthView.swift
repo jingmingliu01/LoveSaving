@@ -17,7 +17,7 @@ struct AuthView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("LoveBank")
+            Text("LoveSaving")
                 .font(.largeTitle.bold())
                 .accessibilityIdentifier("auth.title")
 

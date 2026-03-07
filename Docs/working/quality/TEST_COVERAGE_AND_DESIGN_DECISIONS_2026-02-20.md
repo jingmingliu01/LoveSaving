@@ -1,4 +1,4 @@
-# LoveBank Test Coverage and Design Decisions
+# LoveSaving Test Coverage and Design Decisions
 
 ## Purpose
 This is a historical snapshot (dated 2026-02-20) of the original Phase 1 test strategy and product/UX decisions.
@@ -48,7 +48,7 @@ This is a historical snapshot (dated 2026-02-20) of the original Phase 1 test st
    - Option A: allow multiple pending invites between same two users.
    - Option B: enforce single pending invite pair and reject duplicates.
 2. Group naming rule:
-   - Current default is static `"LoveBank Group"`.
+   - Current default is static `"LoveSaving Group"`.
    - Need final rule (user-provided name, generated name, or fixed).
 3. Email verification gate:
    - Decide whether unverified email users can link/log events.

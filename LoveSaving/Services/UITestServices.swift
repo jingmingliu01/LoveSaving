@@ -81,7 +81,7 @@ final class UITestStore {
 
             let group = LoveGroup(
                 id: groupId,
-                groupName: "LoveBank Group",
+                groupName: "LoveSaving Group",
                 memberIds: [ownerId, partnerId],
                 createdBy: ownerId,
                 status: .active,
@@ -166,7 +166,7 @@ final class UITestAuthService: AuthServicing {
         }
 
         let uid = "user_\(UUID().uuidString.prefix(8))"
-        let user = AuthUser(uid: uid, email: email, displayName: "LoveBank User")
+        let user = AuthUser(uid: uid, email: email, displayName: "LoveSaving User")
         store.authUser = user
         continuation.yield(user)
         return user

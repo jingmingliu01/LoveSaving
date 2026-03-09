@@ -3,7 +3,6 @@ import SwiftUI
 
 @main
 struct LoveSavingApp: App {
-    @State private var hasCompletedOnboarding = false
     @StateObject private var session: AppSession
     @StateObject private var locationManager: LocationManager
     private let container: AppContainer
@@ -27,19 +26,12 @@ struct LoveSavingApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if hasCompletedOnboarding {
-                    RootView()
-                } else {
-                    OnboardingFireIntroView {
-                        hasCompletedOnboarding = true
-                    }
-                }
-            }
+            AppEntryView()
                 .environmentObject(session)
                 .environmentObject(locationManager)
                 .task {
-                    guard hasCompletedOnboarding else { return }
+                    guard session.hasResolvedInitialAuthState else { return }
+                    guard session.profile?.hasCompletedOnboarding == true else { return }
                     guard !container.isUITestMode else { return }
                     locationManager.requestAuthorizationIfNeeded()
                     await session.requestNotifications(suppressErrors: true)

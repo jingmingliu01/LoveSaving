@@ -138,13 +138,14 @@ service cloud.firestore {
     function validUserData(data) {
       return data.keys().hasAll(["displayName", "email", "emailLower", "createdAt", "updatedAt"])
         && data.keys().hasOnly([
-          "displayName", "email", "emailLower", "photoURL", "currentGroupId", "createdAt", "updatedAt", "fcmToken"
+          "displayName", "email", "emailLower", "photoURL", "currentGroupId", "hasCompletedOnboarding", "createdAt", "updatedAt", "fcmToken"
         ])
         && data.displayName is string
         && data.email is string
         && data.emailLower is string
         && isNullableString(data.photoURL)
         && isNullableString(data.currentGroupId)
+        && (!data.keys().hasAny(["hasCompletedOnboarding"]) || data.hasCompletedOnboarding is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && isNullableString(data.fcmToken);
@@ -161,7 +162,7 @@ service cloud.firestore {
       let d = request.resource.data;
       let changed = d.diff(resource.data).affectedKeys();
       return validUserData(d)
-        && changed.hasOnly(["displayName", "photoURL", "fcmToken", "updatedAt", "createdAt", "emailLower"])
+        && changed.hasOnly(["displayName", "photoURL", "fcmToken", "hasCompletedOnboarding", "updatedAt", "createdAt", "emailLower"])
         && d.updatedAt == request.time
         && (
           (resource.data.createdAt is timestamp && d.createdAt == resource.data.createdAt)

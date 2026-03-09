@@ -14,8 +14,9 @@ struct OnboardingFireIntroView: View {
     @State private var revealedCharacterCount = 0
     @State private var showAnimation = false
     @State private var isAdvanceVisible = false
+    @State private var copyOpacity = 1.0
 
-    private let isUITestMode = ProcessInfo.processInfo.environment["LOVEBANK_MODE"] == "UI_TEST"
+    private let isUITestMode = ProcessInfo.processInfo.environment["LOVESAVING_MODE"] == "UI_TEST"
 
     private struct DisplayLine: Identifiable {
         let id: Int
@@ -61,6 +62,7 @@ struct OnboardingFireIntroView: View {
 
                 VStack(spacing: 0) {
                     copyBlock
+                        .opacity(copyOpacity)
                         .padding(.top, max(proxy.size.height * 0.235, 172))
                         .padding(.horizontal, 28)
 
@@ -187,6 +189,11 @@ struct OnboardingFireIntroView: View {
         fullyRevealedLineCount = 0
         typingLineIndex = nil
         revealedCharacterCount = 0
+        copyOpacity = 0
+
+        withAnimation(.easeInOut(duration: isUITestMode ? 0.05 : 0.14)) {
+            copyOpacity = 1
+        }
 
         for index in phase.lines.indices {
             withAnimation(.easeInOut(duration: isUITestMode ? 0.05 : 0.28)) {
@@ -235,13 +242,21 @@ struct OnboardingFireIntroView: View {
     @MainActor
     private func transitionToLovePhase() async {
         isAdvanceVisible = false
-        showAnimation = false
-        fullyRevealedLineCount = 0
-        typingLineIndex = nil
-        revealedCharacterCount = 0
+        withAnimation(.easeOut(duration: isUITestMode ? 0.05 : 0.14)) {
+            copyOpacity = 0
+            showAnimation = false
+        }
 
-        try? await Task.sleep(nanoseconds: isUITestMode ? 50_000_000 : 180_000_000)
+        try? await Task.sleep(nanoseconds: isUITestMode ? 50_000_000 : 140_000_000)
         guard !Task.isCancelled else { return }
+
+        var noAnimation = Transaction()
+        noAnimation.animation = nil
+        withTransaction(noAnimation) {
+            fullyRevealedLineCount = 0
+            typingLineIndex = nil
+            revealedCharacterCount = 0
+        }
 
         phase = .loveNow
         phaseRunToken += 1
@@ -250,13 +265,21 @@ struct OnboardingFireIntroView: View {
     @MainActor
     private func resetToFirePhase() async {
         isAdvanceVisible = false
-        showAnimation = false
-        fullyRevealedLineCount = 0
-        typingLineIndex = nil
-        revealedCharacterCount = 0
+        withAnimation(.easeOut(duration: isUITestMode ? 0.05 : 0.14)) {
+            copyOpacity = 0
+            showAnimation = false
+        }
 
         try? await Task.sleep(nanoseconds: isUITestMode ? 50_000_000 : 120_000_000)
         guard !Task.isCancelled else { return }
+
+        var noAnimation = Transaction()
+        noAnimation.animation = nil
+        withTransaction(noAnimation) {
+            fullyRevealedLineCount = 0
+            typingLineIndex = nil
+            revealedCharacterCount = 0
+        }
 
         phase = .firePast
         phaseRunToken += 1

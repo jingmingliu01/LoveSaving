@@ -4,6 +4,9 @@
   "engines": {
     "node": "20"
   },
+  "scripts": {
+    "backfill:onboarding": "node scripts/backfill-has-completed-onboarding.js"
+  },
   "main": "index.js",
   "dependencies": {
     "firebase-admin": "^12.7.0",

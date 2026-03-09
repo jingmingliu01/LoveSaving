@@ -222,6 +222,13 @@ final class UITestUserDataService: UserDataServicing {
         store.users[uid] = user
     }
 
+    func setHasCompletedOnboarding(uid: String, completed: Bool) async throws {
+        guard var user = store.users[uid] else { return }
+        user.hasCompletedOnboarding = completed
+        user.updatedAt = Date()
+        store.users[uid] = user
+    }
+
     func updateFcmToken(uid: String, token: String) async throws {
         guard var user = store.users[uid] else { return }
         user.fcmToken = token

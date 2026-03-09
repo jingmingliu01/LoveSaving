@@ -45,7 +45,7 @@ jobs:
             -destination 'platform=iOS Simulator,OS=26.2,name=iPhone 17' \
             -resultBundlePath "$GITHUB_WORKSPACE/TestResults/ui-smoke-tests.xcresult" \
             -parallel-testing-enabled NO \
-            -only-testing:LoveSavingUITests/RootFlowSmokeUITests
+            -only-testing:LoveSavingUITests
 
       - name: Collect crash reports
         if: always()

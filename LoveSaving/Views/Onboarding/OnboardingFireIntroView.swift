@@ -84,7 +84,24 @@ struct OnboardingFireIntroView: View {
                     VStack {
                         Spacer()
                         HStack {
+                            if phase == .loveNow {
+                                Button(action: goBackToFirePhase) {
+                                    Image(systemName: "arrow.left")
+                                        .font(.system(size: 20, weight: .semibold))
+                                        .foregroundStyle(.black)
+                                        .frame(width: 56, height: 56)
+                                        .background(.ultraThinMaterial, in: Circle())
+                                        .overlay {
+                                            Circle()
+                                                .strokeBorder(Color.black.opacity(0.18), lineWidth: 1)
+                                        }
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("onboarding.back")
+                            }
+
                             Spacer()
+
                             Button(action: advance) {
                                 Image(systemName: "arrow.right")
                                     .font(.system(size: 20, weight: .semibold))
@@ -98,10 +115,10 @@ struct OnboardingFireIntroView: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("onboarding.next")
-                            .padding(.trailing, 24)
-                            .padding(.bottom, 28)
-                            .transition(.opacity.combined(with: .scale(scale: 0.92)))
                         }
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 28)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
                     }
                 }
             }
@@ -211,6 +228,10 @@ struct OnboardingFireIntroView: View {
         }
     }
 
+    private func goBackToFirePhase() {
+        Task { await resetToFirePhase() }
+    }
+
     @MainActor
     private func transitionToLovePhase() async {
         isAdvanceVisible = false
@@ -223,6 +244,21 @@ struct OnboardingFireIntroView: View {
         guard !Task.isCancelled else { return }
 
         phase = .loveNow
+        phaseRunToken += 1
+    }
+
+    @MainActor
+    private func resetToFirePhase() async {
+        isAdvanceVisible = false
+        showAnimation = false
+        fullyRevealedLineCount = 0
+        typingLineIndex = nil
+        revealedCharacterCount = 0
+
+        try? await Task.sleep(nanoseconds: isUITestMode ? 50_000_000 : 120_000_000)
+        guard !Task.isCancelled else { return }
+
+        phase = .firePast
         phaseRunToken += 1
     }
 }

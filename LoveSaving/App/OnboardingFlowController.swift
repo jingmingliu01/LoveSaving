@@ -13,7 +13,7 @@ final class OnboardingFlowController: ObservableObject {
     @Published private(set) var route: Route = .loading
 
     private var isSyncingRemoteCompletion = false
-    private var hasPendingAnonymousCompletion = false
+    private var hasCompletedOnboardingThisSession = false
     private let shouldBypassOnboardingForTests =
         ProcessInfo.processInfo.environment["LOVESAVING_SKIP_ONBOARDING"] == "1"
 
@@ -30,21 +30,16 @@ final class OnboardingFlowController: ObservableObject {
 
         let remoteCompleted = session.profile?.hasCompletedOnboarding == true
 
-        if session.isSignedIn, remoteCompleted {
-            hasPendingAnonymousCompletion = false
+        if remoteCompleted {
             route = .app
             return
         }
 
-        if session.isSignedIn, hasPendingAnonymousCompletion {
-            hasPendingAnonymousCompletion = false
+        if hasCompletedOnboardingThisSession {
             route = .app
-            await syncRemoteCompletionIfNeeded(using: session)
-            return
-        }
-
-        if !session.isSignedIn, hasPendingAnonymousCompletion {
-            route = .app
+            if session.isSignedIn {
+                await syncRemoteCompletionIfNeeded(using: session)
+            }
             return
         }
 
@@ -61,7 +56,7 @@ final class OnboardingFlowController: ObservableObject {
     }
 
     func completeTutorial(using session: AppSession) async {
-        hasPendingAnonymousCompletion = !session.isSignedIn
+        hasCompletedOnboardingThisSession = true
         route = .app
         await syncRemoteCompletionIfNeeded(using: session)
     }

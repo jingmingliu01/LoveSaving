@@ -32,6 +32,55 @@ final class OnboardingSmokeUITests: XCTestCase {
         assertElementExists("root.auth", in: app, timeout: Timeout.root)
     }
 
+    func testSignedOutUserCanSignUpAfterOnboardingWithoutReplay() {
+        let app = launchApp(scenario: "signed_out")
+
+        completePart1(in: app)
+        completePart2(in: app)
+
+        assertElementExists("root.auth", in: app, timeout: Timeout.root)
+
+        let signUpSegment = app.segmentedControls.buttons["Sign Up"]
+        XCTAssertTrue(signUpSegment.waitForExistence(timeout: Timeout.root))
+        signUpSegment.tap()
+
+        let email = "onboarding-smoke-\(UUID().uuidString.prefix(8))@example.com"
+        let password = "secret12"
+        let displayName = "Smoke User"
+
+        let emailField = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Email")).firstMatch
+        XCTAssertTrue(emailField.waitForExistence(timeout: Timeout.root))
+        emailField.tap()
+        emailField.typeText(email)
+
+        let passwordField = app.secureTextFields.matching(NSPredicate(format: "placeholderValue == %@", "Password")).firstMatch
+        XCTAssertTrue(passwordField.waitForExistence(timeout: Timeout.root))
+        passwordField.tap()
+        passwordField.typeText(password)
+
+        let displayNameField = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Display Name")).firstMatch
+        XCTAssertTrue(displayNameField.waitForExistence(timeout: Timeout.root))
+        displayNameField.tap()
+        displayNameField.typeText(displayName)
+
+        let submitButton = app.buttons["auth.submit"]
+        XCTAssertTrue(submitButton.waitForExistence(timeout: Timeout.root))
+        submitButton.tap()
+
+        XCTAssertFalse(
+            app.alerts["Error"].waitForExistence(timeout: 3),
+            "Did not expect a blocking auth/linking alert after onboarding sign-up. UI hierarchy:\n\(app.debugDescription)"
+        )
+
+        assertElementExists("root.linking", in: app, timeout: Timeout.root)
+        assertElementExists("linking.incoming.empty", in: app, timeout: Timeout.root)
+
+        XCTAssertFalse(
+            app.buttons["onboarding.next"].waitForExistence(timeout: 3),
+            "Onboarding unexpectedly replayed after sign-up. UI hierarchy:\n\(app.debugDescription)"
+        )
+    }
+
     private func launchApp(scenario: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.terminate()

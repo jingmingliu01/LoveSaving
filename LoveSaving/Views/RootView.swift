@@ -7,14 +7,17 @@ struct RootView: View {
         NavigationStack {
             Group {
                 if !session.isSignedIn {
-                    AuthView()
-                        .accessibilityIdentifier("root.auth")
+                    rootContent(identifier: "root.auth") {
+                        AuthView()
+                    }
                 } else if !session.isLinked {
-                    LinkingView()
-                        .accessibilityIdentifier("root.linking")
+                    rootContent(identifier: "root.linking") {
+                        LinkingView()
+                    }
                 } else {
-                    MainTabView()
-                        .accessibilityIdentifier("root.main")
+                    rootContent(identifier: "root.main") {
+                        MainTabView()
+                    }
                 }
             }
             .overlay(alignment: .center) {
@@ -45,5 +48,19 @@ struct RootView: View {
                 Text(session.globalErrorMessage ?? "Unknown error")
             }
         )
+    }
+
+    @ViewBuilder
+    private func rootContent<Content: View>(
+        identifier: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ZStack(alignment: .topLeading) {
+            content()
+            Color.clear
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier(identifier)
+        }
     }
 }

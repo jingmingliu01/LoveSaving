@@ -237,7 +237,7 @@ struct TutorialOverlayView: View {
         case .revealHome:
             return nil
         case .focusHeart:
-            return ("Tap the heart a few times.", nil)
+            return ("Tap the heart a few times,\nthen wait.", nil)
         case .submitDraft:
             return ("Submit to save the moment.", nil)
         case .completion:

@@ -44,8 +44,8 @@ Implement Onboarding Part 2 as a native Home-screen tutorial overlay that reuses
 - Spotlight target: `home.tapButton`
 - Only interactive control: `home.tapButton`
 - Suggested copy:
-  - `Tap here a few times.`
-  - `This is how you start a loving moment.`
+  - `Tap the heart a few times,`
+  - `then wait.`
 - Advance rule:
   - advance after the user has tapped enough times to make the burst feel intentional
   - practical threshold: `tapCount >= 3`

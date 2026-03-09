@@ -105,7 +105,7 @@ final class AppSession: ObservableObject {
         guard let uid = authUser?.uid else { return }
         do {
             try await container.authService.ensureSessionReady()
-            inboundInvites = try await fetchActiveInboundInvites(for: uid)
+            await refreshInboundInvites(for: uid, source: "invite.refresh", presentToUser: false)
         } catch {
             handleError(error, source: "invite.refresh", presentToUser: true)
         }
@@ -368,7 +368,24 @@ final class AppSession: ObservableObject {
         } else {
             self.group = nil
             events = []
-            inboundInvites = try await fetchActiveInboundInvites(for: user.uid)
+            await refreshInboundInvites(
+                for: user.uid,
+                source: "auth.refresh.inboundInvites",
+                presentToUser: false
+            )
+        }
+    }
+
+    private func refreshInboundInvites(
+        for uid: String,
+        source: String,
+        presentToUser: Bool
+    ) async {
+        do {
+            inboundInvites = try await fetchActiveInboundInvites(for: uid)
+        } catch {
+            inboundInvites = []
+            handleError(error, source: source, presentToUser: presentToUser)
         }
     }
 

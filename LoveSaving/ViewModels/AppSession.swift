@@ -10,6 +10,7 @@ final class AppSession: ObservableObject {
     @Published private(set) var group: LoveGroup?
     @Published private(set) var inboundInvites: [Invite] = []
     @Published private(set) var events: [LoveEvent] = []
+    @Published private(set) var hasResolvedInitialAuthState = false
 
     @Published var globalErrorMessage: String?
     @Published var isBusy = false
@@ -104,7 +105,7 @@ final class AppSession: ObservableObject {
         guard let uid = authUser?.uid else { return }
         do {
             try await container.authService.ensureSessionReady()
-            inboundInvites = try await fetchActiveInboundInvites(for: uid)
+            await refreshInboundInvites(for: uid, source: "invite.refresh", presentToUser: false)
         } catch {
             handleError(error, source: "invite.refresh", presentToUser: true)
         }
@@ -266,6 +267,26 @@ final class AppSession: ObservableObject {
         }
     }
 
+    @discardableResult
+    func markOnboardingCompleted() async -> Bool {
+        guard let uid = authUser?.uid ?? container.authService.currentUser?.uid else {
+            return false
+        }
+
+        do {
+            try await container.userDataService.setHasCompletedOnboarding(uid: uid, completed: true)
+            if var currentProfile = profile {
+                currentProfile.hasCompletedOnboarding = true
+                currentProfile.updatedAt = Date()
+                profile = currentProfile
+            }
+            return true
+        } catch {
+            handleError(error, source: "profile.markOnboardingCompleted", presentToUser: false)
+            return false
+        }
+    }
+
     func softUnlinkCurrentGroup() async {
         await runBusyTask(source: "group.softUnlink") { [self] in
             guard let group else {
@@ -307,8 +328,10 @@ final class AppSession: ObservableObject {
                         inboundInvites = []
                         events = []
                     }
+                    hasResolvedInitialAuthState = true
                 } catch {
                     handleError(error, source: "auth.observe", presentToUser: true)
+                    hasResolvedInitialAuthState = true
                 }
             }
         }
@@ -345,7 +368,24 @@ final class AppSession: ObservableObject {
         } else {
             self.group = nil
             events = []
-            inboundInvites = try await fetchActiveInboundInvites(for: user.uid)
+            await refreshInboundInvites(
+                for: user.uid,
+                source: "auth.refresh.inboundInvites",
+                presentToUser: false
+            )
+        }
+    }
+
+    private func refreshInboundInvites(
+        for uid: String,
+        source: String,
+        presentToUser: Bool
+    ) async {
+        do {
+            inboundInvites = try await fetchActiveInboundInvites(for: uid)
+        } catch {
+            inboundInvites = []
+            handleError(error, source: source, presentToUser: presentToUser)
         }
     }
 

@@ -150,6 +150,7 @@ final class FirebaseUserDataService: UserDataServicing {
                     "emailLower": emailLower,
                     "photoURL": firestoreNullable(user.photoURL),
                     "currentGroupId": firestoreNullable(user.currentGroupId),
+                    "hasCompletedOnboarding": user.hasCompletedOnboarding,
                     "updatedAt": FieldValue.serverTimestamp(),
                     "fcmToken": firestoreNullable(user.fcmToken)
                 ]
@@ -167,6 +168,7 @@ final class FirebaseUserDataService: UserDataServicing {
                     "emailLower": emailLower,
                     "photoURL": firestoreNullable(user.photoURL),
                     "currentGroupId": firestoreNullable(user.currentGroupId),
+                    "hasCompletedOnboarding": user.hasCompletedOnboarding,
                     "createdAt": FieldValue.serverTimestamp(),
                     "updatedAt": FieldValue.serverTimestamp(),
                     "fcmToken": firestoreNullable(user.fcmToken)
@@ -209,6 +211,13 @@ final class FirebaseUserDataService: UserDataServicing {
     func setCurrentGroup(uid: String, groupId: String?) async throws {
         try await db.collection("users").document(uid).setData([
             "currentGroupId": firestoreNullable(groupId),
+            "updatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+    }
+
+    func setHasCompletedOnboarding(uid: String, completed: Bool) async throws {
+        try await db.collection("users").document(uid).setData([
+            "hasCompletedOnboarding": completed,
             "updatedAt": FieldValue.serverTimestamp()
         ], merge: true)
     }
@@ -722,6 +731,7 @@ private extension DocumentSnapshot {
             email: email,
             photoURL: data["photoURL"] as? String,
             currentGroupId: data["currentGroupId"] as? String,
+            hasCompletedOnboarding: data["hasCompletedOnboarding"] as? Bool ?? false,
             createdAt: createdAt,
             updatedAt: updatedAt,
             fcmToken: data["fcmToken"] as? String

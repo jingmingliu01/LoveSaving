@@ -59,6 +59,7 @@ protocol UserDataServicing {
     func findUser(email: String) async throws -> UserProfile?
     func resolveUserID(identifier: String) async throws -> String?
     func setCurrentGroup(uid: String, groupId: String?) async throws
+    func setHasCompletedOnboarding(uid: String, completed: Bool) async throws
     func updateFcmToken(uid: String, token: String) async throws
 }
 

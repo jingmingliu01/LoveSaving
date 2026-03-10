@@ -55,12 +55,12 @@ struct AppContainer {
     )
 
     static func runtimeModeForCurrentProcess(environment: [String: String] = ProcessInfo.processInfo.environment) -> AppRuntimeMode {
-        if environment["LOVEBANK_MODE"] == "LIVE" {
+        if environment["LOVESAVING_MODE"] == "LIVE" {
             return .live
         }
 
-        if environment["LOVEBANK_MODE"] == "UI_TEST" {
-            let scenario = UITestScenario(rawValue: environment["LOVEBANK_SCENARIO"] ?? "") ?? .linked
+        if environment["LOVESAVING_MODE"] == "UI_TEST" {
+            let scenario = UITestScenario(rawValue: environment["LOVESAVING_SCENARIO"] ?? "") ?? .linked
             return .uiTest(scenario)
         }
 

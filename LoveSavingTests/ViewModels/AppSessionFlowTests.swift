@@ -91,6 +91,33 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertEqual(session.globalErrorMessage, AppError.locationUnavailable.localizedDescription)
     }
 
+    func testSignUpSucceedsWhenInboundInviteRefreshFails() async {
+        let store = UITestStore.makeSeeded(scenario: .signedOut)
+        let auth = UITestAuthService(store: store)
+        let container = AppContainer(
+            authService: auth,
+            userDataService: UITestUserDataService(store: store),
+            inviteService: InviteFetchFailingService(),
+            groupService: UITestGroupService(store: store),
+            eventService: UITestEventService(store: store),
+            mediaService: UITestMediaService(),
+            messagingService: UITestMessagingService(),
+            runtimeMode: .uiTest(.signedOut)
+        )
+        let session = AppSession(container: container)
+
+        await session.signUp(
+            email: "invite-failure@example.com",
+            password: "secret123",
+            displayName: "Invite Failure"
+        )
+
+        XCTAssertTrue(session.isSignedIn)
+        XCTAssertEqual(session.profile?.email, "invite-failure@example.com")
+        XCTAssertEqual(session.inboundInvites, [])
+        XCTAssertNil(session.globalErrorMessage)
+    }
+
     private func makeSession(scenario: UITestScenario) -> AppSession {
         AppSession(container: .uiTest(scenario: scenario))
     }
@@ -110,5 +137,32 @@ final class AppSessionFlowTests: XCTestCase {
         }
 
         XCTFail("Timed out waiting for condition: \(description)")
+    }
+}
+
+@MainActor
+private struct InviteFetchFailingService: InviteServicing {
+    struct Failure: LocalizedError {
+        var errorDescription: String? {
+            "Missing or insufficient permissions."
+        }
+    }
+
+    func sendInvite(
+        fromUid: String,
+        toUid: String,
+        expiresAt: Date?,
+        fromDisplayName: String?,
+        fromEmail: String?
+    ) async throws -> Invite {
+        fatalError("sendInvite should not be called in this test")
+    }
+
+    func fetchInboundInvites(for uid: String) async throws -> [Invite] {
+        throw Failure()
+    }
+
+    func respondInvite(inviteId: String, status: InviteStatus, respondedAt: Date) async throws {
+        fatalError("respondInvite should not be called in this test")
     }
 }

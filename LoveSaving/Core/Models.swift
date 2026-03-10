@@ -23,6 +23,7 @@ public struct UserProfile: Identifiable, Codable, Sendable, Equatable {
     public var email: String
     public var photoURL: String?
     public var currentGroupId: String?
+    public var hasCompletedOnboarding: Bool
     public var createdAt: Date
     public var updatedAt: Date
     public var fcmToken: String?
@@ -33,6 +34,7 @@ public struct UserProfile: Identifiable, Codable, Sendable, Equatable {
         email: String,
         photoURL: String? = nil,
         currentGroupId: String? = nil,
+        hasCompletedOnboarding: Bool = false,
         createdAt: Date,
         updatedAt: Date,
         fcmToken: String? = nil
@@ -42,6 +44,7 @@ public struct UserProfile: Identifiable, Codable, Sendable, Equatable {
         self.email = email
         self.photoURL = photoURL
         self.currentGroupId = currentGroupId
+        self.hasCompletedOnboarding = hasCompletedOnboarding
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.fcmToken = fcmToken

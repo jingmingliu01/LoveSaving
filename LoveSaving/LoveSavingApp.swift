@@ -5,6 +5,7 @@ import SwiftUI
 struct LoveSavingApp: App {
     @StateObject private var session: AppSession
     @StateObject private var locationManager: LocationManager
+    @State private var requestedPermissionsUserID: String?
     private let container: AppContainer
 
     init() {
@@ -30,12 +31,30 @@ struct LoveSavingApp: App {
                 .environmentObject(session)
                 .environmentObject(locationManager)
                 .task {
-                    guard session.hasResolvedInitialAuthState else { return }
-                    guard session.profile?.hasCompletedOnboarding == true else { return }
-                    guard !container.isUITestMode else { return }
-                    locationManager.requestAuthorizationIfNeeded()
-                    await session.requestNotifications(suppressErrors: true)
+                    await maybeRequestPostOnboardingPermissions()
+                }
+                .onChange(of: session.hasResolvedInitialAuthState) { _, _ in
+                    Task { await maybeRequestPostOnboardingPermissions() }
+                }
+                .onChange(of: session.profile?.hasCompletedOnboarding) { _, _ in
+                    Task { await maybeRequestPostOnboardingPermissions() }
+                }
+                .onChange(of: session.authUser?.uid) { _, _ in
+                    Task { await maybeRequestPostOnboardingPermissions() }
                 }
         }
+    }
+
+    @MainActor
+    private func maybeRequestPostOnboardingPermissions() async {
+        guard !container.isUITestMode else { return }
+        guard session.hasResolvedInitialAuthState else { return }
+        guard session.profile?.hasCompletedOnboarding == true else { return }
+        guard let uid = session.authUser?.uid else { return }
+        guard requestedPermissionsUserID != uid else { return }
+
+        requestedPermissionsUserID = uid
+        locationManager.requestAuthorizationIfNeeded()
+        await session.requestNotifications(suppressErrors: true)
     }
 }

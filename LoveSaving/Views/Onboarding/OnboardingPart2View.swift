@@ -121,15 +121,6 @@ struct OnboardingPart2View: View {
         }
     }
 
-    private func scheduleTransition(to nextStep: OnboardingPart2Step, after nanoseconds: UInt64) {
-        let token = refreshTransitionToken()
-        Task {
-            try? await Task.sleep(nanoseconds: nanoseconds)
-            guard !Task.isCancelled, token == transitionToken else { return }
-            transition(to: nextStep)
-        }
-    }
-
     @discardableResult
     private func refreshTransitionToken() -> UUID {
         let token = UUID()

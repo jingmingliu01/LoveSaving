@@ -4,32 +4,25 @@ import SwiftUI
 struct LottieLoopView: UIViewRepresentable {
     let animationName: String
 
-    func makeUIView(context: Context) -> UIView {
-        let containerView = UIView()
+    func makeUIView(context: Context) -> AnimationContainerView {
+        let containerView = AnimationContainerView()
         containerView.backgroundColor = .clear
 
-        let animationView = LottieAnimationView(name: animationName)
-        animationView.translatesAutoresizingMaskIntoConstraints = false
-        animationView.contentMode = .scaleAspectFit
-        animationView.loopMode = .loop
-        animationView.backgroundBehavior = .pauseAndRestore
-        animationView.shouldRasterizeWhenIdle = true
-        animationView.play()
-
-        containerView.addSubview(animationView)
-        NSLayoutConstraint.activate([
-            animationView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-            animationView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-            animationView.topAnchor.constraint(equalTo: containerView.topAnchor),
-            animationView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-        ])
-
-        context.coordinator.animationView = animationView
+        let animationView = makeAnimationView()
+        containerView.install(animationView)
+        context.coordinator.animationName = animationName
         return containerView
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        guard let animationView = context.coordinator.animationView else { return }
+    func updateUIView(_ uiView: AnimationContainerView, context: Context) {
+        if context.coordinator.animationName != animationName {
+            let animationView = makeAnimationView()
+            uiView.install(animationView)
+            context.coordinator.animationName = animationName
+            return
+        }
+
+        guard let animationView = uiView.animationView else { return }
         if !animationView.isAnimationPlaying {
             animationView.play()
         }
@@ -39,7 +32,36 @@ struct LottieLoopView: UIViewRepresentable {
         Coordinator()
     }
 
+    private func makeAnimationView() -> LottieAnimationView {
+        let animationView = LottieAnimationView(name: animationName)
+        animationView.translatesAutoresizingMaskIntoConstraints = false
+        animationView.contentMode = .scaleAspectFit
+        animationView.loopMode = .loop
+        animationView.backgroundBehavior = .pauseAndRestore
+        animationView.shouldRasterizeWhenIdle = true
+        animationView.play()
+        return animationView
+    }
+
+    final class AnimationContainerView: UIView {
+        fileprivate var animationView: LottieAnimationView?
+
+        fileprivate func install(_ newAnimationView: LottieAnimationView) {
+            animationView?.stop()
+            animationView?.removeFromSuperview()
+            animationView = newAnimationView
+
+            addSubview(newAnimationView)
+            NSLayoutConstraint.activate([
+                newAnimationView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                newAnimationView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                newAnimationView.topAnchor.constraint(equalTo: topAnchor),
+                newAnimationView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+        }
+    }
+
     final class Coordinator {
-        var animationView: LottieAnimationView?
+        var animationName: String?
     }
 }

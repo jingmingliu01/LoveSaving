@@ -14,6 +14,7 @@ struct AppContainer {
     let eventService: EventServicing
     let mediaService: MediaServicing
     let messagingService: MessagingServicing
+    let crashReporter: any CrashlyticsReporting
     let runtimeMode: AppRuntimeMode
 
     init(
@@ -24,6 +25,7 @@ struct AppContainer {
         eventService: EventServicing,
         mediaService: MediaServicing,
         messagingService: MessagingServicing,
+        crashReporter: any CrashlyticsReporting = NoopCrashlyticsReporter(),
         runtimeMode: AppRuntimeMode = .live
     ) {
         self.authService = authService
@@ -33,6 +35,7 @@ struct AppContainer {
         self.eventService = eventService
         self.mediaService = mediaService
         self.messagingService = messagingService
+        self.crashReporter = crashReporter
         self.runtimeMode = runtimeMode
     }
 
@@ -51,6 +54,7 @@ struct AppContainer {
         eventService: FirebaseEventService(),
         mediaService: FirebaseStorageMediaService(),
         messagingService: FirebaseMessagingService(),
+        crashReporter: FirebaseCrashlyticsReporter(),
         runtimeMode: .live
     )
 
@@ -95,6 +99,7 @@ struct AppContainer {
             eventService: UITestEventService(store: store),
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
+            crashReporter: NoopCrashlyticsReporter(),
             runtimeMode: .uiTest(scenario)
         )
     }
@@ -107,5 +112,16 @@ struct AppContainer {
             return true
         }
         return NSClassFromString("XCTestCase") != nil
+    }
+}
+
+extension AppRuntimeMode {
+    var crashlyticsValue: String {
+        switch self {
+        case .live:
+            return "live"
+        case .uiTest(let scenario):
+            return "ui_test.\(scenario.rawValue)"
+        }
     }
 }

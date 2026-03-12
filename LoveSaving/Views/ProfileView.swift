@@ -5,6 +5,7 @@ struct ProfileView: View {
 
     @State private var newDisplayName = ""
     @State private var newPassword = ""
+    @State private var isShowingCrashlyticsTestAlert = false
 
     var body: some View {
         NavigationStack {
@@ -69,8 +70,29 @@ struct ProfileView: View {
                     }
                     .accessibilityIdentifier("profile.signOut")
                 }
+
+#if DEBUG
+                Section {
+                    Button("Crashlytics Test Crash", role: .destructive) {
+                        isShowingCrashlyticsTestAlert = true
+                    }
+                    .accessibilityIdentifier("profile.crashlytics.testCrash")
+                } header: {
+                    Text("Diagnostics")
+                } footer: {
+                    Text("Use this only to verify Crashlytics. The app will terminate immediately.")
+                }
+#endif
             }
             .navigationTitle("Profile")
+            .alert("Trigger test crash?", isPresented: $isShowingCrashlyticsTestAlert) {
+                Button("Cancel", role: .cancel) {}
+                Button("Crash App", role: .destructive) {
+                    fatalError("Crashlytics test crash triggered from ProfileView")
+                }
+            } message: {
+                Text("This is a manual Crashlytics verification action for debug builds.")
+            }
         }
     }
 }

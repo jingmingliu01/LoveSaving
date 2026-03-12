@@ -1,7 +1,6 @@
 import CoreLocation
 import Foundation
 import Combine
-import FirebaseCrashlytics
 
 @MainActor
 final class AppSession: ObservableObject {
@@ -16,11 +15,16 @@ final class AppSession: ObservableObject {
     @Published var isBusy = false
 
     private let container: AppContainer
+    private let crashReporter: any CrashlyticsReporting
     private var authTask: Task<Void, Never>?
     private var messagingTask: Task<Void, Never>?
+    private var crashRoute = "unknown"
+    private var currentOperationContext = OperationContext.source("none")
 
     init(container: AppContainer) {
         self.container = container
+        self.crashReporter = container.crashReporter
+        syncCrashlyticsContext()
         observeAuthState()
         observeMessagingToken()
     }
@@ -38,8 +42,13 @@ final class AppSession: ObservableObject {
         group?.status == .active
     }
 
+    func updateCrashlyticsRoute(_ route: String) {
+        crashRoute = route
+        syncCrashlyticsContext()
+    }
+
     func signUp(email: String, password: String, displayName: String) async {
-        await runBusyTask(source: "auth.signUp") { [self] in
+        await runBusyTask(context: .source("auth.signUp")) { [self] in
             let user = try await container.authService.signUp(email: email, password: password, displayName: displayName)
             let now = Date()
             let profile = UserProfile(
@@ -55,7 +64,7 @@ final class AppSession: ObservableObject {
     }
 
     func signIn(email: String, password: String) async {
-        await runBusyTask(source: "auth.signIn") { [self] in
+        await runBusyTask(context: .source("auth.signIn")) { [self] in
             let user = try await container.authService.signIn(email: email, password: password)
             _ = try await ensureProfileExists(for: user)
             try await refreshForAuthUser(user)
@@ -71,19 +80,20 @@ final class AppSession: ObservableObject {
             inboundInvites = []
             events = []
             globalErrorMessage = nil
+            syncCrashlyticsContext()
         } catch {
             handleError(error, source: "auth.signOut", presentToUser: true)
         }
     }
 
     func changePassword(_ newPassword: String) async {
-        await runBusyTask(source: "auth.changePassword") { [self] in
+        await runBusyTask(context: .source("auth.changePassword")) { [self] in
             try await container.authService.changePassword(newPassword: newPassword)
         }
     }
 
     func changeDisplayName(_ newDisplayName: String) async {
-        await runBusyTask(source: "profile.changeDisplayName") { [self] in
+        await runBusyTask(context: .source("profile.changeDisplayName")) { [self] in
             guard var currentProfile = profile else {
                 throw AppError.userNotFound
             }
@@ -112,7 +122,7 @@ final class AppSession: ObservableObject {
     }
 
     func sendInvite(to identifier: String) async {
-        await runBusyTask(source: "invite.send") { [self] in
+        await runBusyTask(context: .source("invite.send")) { [self] in
             try await container.authService.ensureSessionReady()
             let currentUser = try await resolvedAuthUser()
 
@@ -142,7 +152,7 @@ final class AppSession: ObservableObject {
     }
 
     func respond(invite: Invite, accept: Bool) async {
-        await runBusyTask(source: "invite.respond") { [self] in
+        await runBusyTask(context: .inviteResponse(accept, source: "invite.respond")) { [self] in
             let respondedAt = Date()
             if let expiresAt = invite.expiresAt, expiresAt <= respondedAt {
                 try await container.inviteService.respondInvite(
@@ -197,7 +207,14 @@ final class AppSession: ObservableObject {
         coordinate: CLLocationCoordinate2D?,
         addressText: String?
     ) async -> Bool {
-        await runBusyTask(source: "event.submitTapBurst") { [self] in
+        await runBusyTask(
+            context: .tapBurst(
+                source: "event.submitTapBurst",
+                eventType: type,
+                tapCount: tapCount,
+                hasImage: imageData != nil
+            )
+        ) { [self] in
             guard tapCount > 0 else {
                 throw AppError.emptyTapBurst
             }
@@ -255,6 +272,7 @@ final class AppSession: ObservableObject {
                 self.group = refreshedGroup
             }
             events = try await container.eventService.fetchEvents(groupId: group.id, limit: 200)
+            syncCrashlyticsContext()
         }
     }
 
@@ -262,6 +280,7 @@ final class AppSession: ObservableObject {
         guard let group else { return }
         do {
             events = try await container.eventService.fetchEvents(groupId: group.id, limit: 200)
+            syncCrashlyticsContext()
         } catch {
             handleError(error, source: "event.refresh", presentToUser: true)
         }
@@ -274,12 +293,14 @@ final class AppSession: ObservableObject {
         }
 
         do {
+            applyOperationContext(.source("profile.markOnboardingCompleted"))
             try await container.userDataService.setHasCompletedOnboarding(uid: uid, completed: true)
             if var currentProfile = profile {
                 currentProfile.hasCompletedOnboarding = true
                 currentProfile.updatedAt = Date()
                 profile = currentProfile
             }
+            syncCrashlyticsContext()
             return true
         } catch {
             handleError(error, source: "profile.markOnboardingCompleted", presentToUser: false)
@@ -288,7 +309,7 @@ final class AppSession: ObservableObject {
     }
 
     func softUnlinkCurrentGroup() async {
-        await runBusyTask(source: "group.softUnlink") { [self] in
+        await runBusyTask(context: .source("group.softUnlink")) { [self] in
             guard let group else {
                 throw AppError.missingGroup
             }
@@ -302,6 +323,7 @@ final class AppSession: ObservableObject {
 
     func requestNotifications(suppressErrors: Bool = false) async {
         do {
+            applyOperationContext(.source("notifications.request"))
             try await container.messagingService.requestNotificationAuthorization()
             try await container.messagingService.scheduleDailyReflectionReminder()
         } catch {
@@ -329,9 +351,11 @@ final class AppSession: ObservableObject {
                         events = []
                     }
                     hasResolvedInitialAuthState = true
+                    syncCrashlyticsContext()
                 } catch {
                     handleError(error, source: "auth.observe", presentToUser: true)
                     hasResolvedInitialAuthState = true
+                    syncCrashlyticsContext()
                 }
             }
         }
@@ -374,6 +398,8 @@ final class AppSession: ObservableObject {
                 presentToUser: false
             )
         }
+
+        syncCrashlyticsContext()
     }
 
     private func refreshInboundInvites(
@@ -387,6 +413,7 @@ final class AppSession: ObservableObject {
             inboundInvites = []
             handleError(error, source: source, presentToUser: presentToUser)
         }
+        syncCrashlyticsContext()
     }
 
     private func fetchActiveInboundInvites(for uid: String) async throws -> [Invite] {
@@ -452,11 +479,12 @@ final class AppSession: ObservableObject {
 
     @discardableResult
     private func runBusyTask(
-        source: String,
+        context: OperationContext,
         _ operation: @escaping () async throws -> Void
     ) async -> Bool {
         globalErrorMessage = nil
         isBusy = true
+        applyOperationContext(context)
         defer {
             isBusy = false
         }
@@ -465,18 +493,95 @@ final class AppSession: ObservableObject {
             try await operation()
             return true
         } catch {
-            handleError(error, source: source, presentToUser: true)
+            handleError(error, source: context.source, presentToUser: true)
             return false
         }
     }
 
     private func handleError(_ error: Error, source: String, presentToUser: Bool) {
+        if currentOperationContext.source != source {
+            applyOperationContext(.source(source))
+        }
+        syncCrashlyticsContext()
+        let nsError = error as NSError
+        crashReporter.log(
+            "source=\(source) route=\(crashRoute) type=\(String(reflecting: type(of: error))) domain=\(nsError.domain) code=\(nsError.code)"
+        )
         if !(error is AppError) {
-            Crashlytics.crashlytics().record(error: error)
+            crashReporter.record(error: error)
         }
         print("[AppSession][\(source)] \(error.localizedDescription)")
         if presentToUser {
             globalErrorMessage = error.localizedDescription
         }
+    }
+
+    private func syncCrashlyticsContext() {
+        crashReporter.setUserID(authUser?.uid ?? "")
+        crashReporter.setCustomValue(container.runtimeMode.crashlyticsValue, forKey: "runtime_mode")
+        crashReporter.setCustomValue(crashRoute, forKey: "app_route")
+        crashReporter.setCustomValue(hasResolvedInitialAuthState, forKey: "has_resolved_initial_auth_state")
+        crashReporter.setCustomValue(isSignedIn, forKey: "is_signed_in")
+        crashReporter.setCustomValue(profile?.hasCompletedOnboarding == true, forKey: "has_completed_onboarding")
+        crashReporter.setCustomValue(isLinked, forKey: "is_linked")
+        crashReporter.setCustomValue(group != nil, forKey: "group_id_present")
+        crashReporter.setCustomValue(inboundInvites.count, forKey: "inbound_invite_count")
+        crashReporter.setCustomValue(events.count, forKey: "cached_event_count")
+    }
+
+    private func applyOperationContext(_ context: OperationContext) {
+        currentOperationContext = context
+        crashReporter.setCustomValue(context.source, forKey: "last_operation")
+        crashReporter.setCustomValue(context.eventType, forKey: "operation_event_type")
+        crashReporter.setCustomValue(context.tapCount, forKey: "operation_tap_count")
+        crashReporter.setCustomValue(context.hasImage, forKey: "operation_has_image")
+        crashReporter.setCustomValue(context.inviteResponse, forKey: "operation_invite_response")
+    }
+}
+
+private struct OperationContext {
+    let source: String
+    let eventType: String
+    let tapCount: Int
+    let hasImage: Bool
+    let inviteResponse: String
+
+    init(
+        source: String,
+        eventType: String = "none",
+        tapCount: Int = -1,
+        hasImage: Bool = false,
+        inviteResponse: String = "none"
+    ) {
+        self.source = source
+        self.eventType = eventType
+        self.tapCount = tapCount
+        self.hasImage = hasImage
+        self.inviteResponse = inviteResponse
+    }
+
+    static func source(_ source: String) -> OperationContext {
+        OperationContext(source: source)
+    }
+
+    static func tapBurst(
+        source: String,
+        eventType: EventType,
+        tapCount: Int,
+        hasImage: Bool
+    ) -> OperationContext {
+        OperationContext(
+            source: source,
+            eventType: eventType.rawValue,
+            tapCount: tapCount,
+            hasImage: hasImage
+        )
+    }
+
+    static func inviteResponse(_ accept: Bool, source: String) -> OperationContext {
+        OperationContext(
+            source: source,
+            inviteResponse: accept ? "accept" : "reject"
+        )
     }
 }

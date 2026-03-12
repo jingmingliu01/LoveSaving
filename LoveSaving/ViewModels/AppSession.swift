@@ -499,8 +499,9 @@ final class AppSession: ObservableObject {
 
     private func handleError(_ error: Error, source: String, presentToUser: Bool) {
         syncCrashlyticsContext()
+        let nsError = error as NSError
         crashReporter.log(
-            "source=\(source) route=\(crashRoute) type=\(String(reflecting: type(of: error))) message=\(error.localizedDescription)"
+            "source=\(source) route=\(crashRoute) type=\(String(reflecting: type(of: error))) domain=\(nsError.domain) code=\(nsError.code)"
         )
         if !(error is AppError) {
             crashReporter.record(error: error)

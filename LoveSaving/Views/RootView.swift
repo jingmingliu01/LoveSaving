@@ -61,6 +61,9 @@ struct RootView: View {
                 .frame(width: 1, height: 1)
                 .allowsHitTesting(false)
                 .accessibilityIdentifier(identifier)
+                .onAppear {
+                    session.updateCrashlyticsRoute(identifier)
+                }
         }
     }
 }

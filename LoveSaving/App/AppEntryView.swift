@@ -11,9 +11,15 @@ struct AppEntryView: View {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.white.ignoresSafeArea())
+                    .onAppear {
+                        session.updateCrashlyticsRoute("entry.loading")
+                    }
             case .part1:
                 OnboardingFireIntroView {
                     onboardingFlow.startPart2()
+                }
+                .onAppear {
+                    session.updateCrashlyticsRoute("entry.onboarding.part1")
                 }
             case .part2:
                 OnboardingPart2View {
@@ -21,8 +27,14 @@ struct AppEntryView: View {
                         await onboardingFlow.completeTutorial(using: session)
                     }
                 }
+                .onAppear {
+                    session.updateCrashlyticsRoute("entry.onboarding.part2")
+                }
             case .app:
                 RootView()
+                    .onAppear {
+                        session.updateCrashlyticsRoute("entry.app")
+                    }
             }
         }
         .task {

@@ -19,6 +19,7 @@ final class AppSession: ObservableObject {
     private var authTask: Task<Void, Never>?
     private var messagingTask: Task<Void, Never>?
     private var crashRoute = "unknown"
+    private var currentOperationContext = OperationContext.source("none")
 
     init(container: AppContainer) {
         self.container = container
@@ -498,6 +499,9 @@ final class AppSession: ObservableObject {
     }
 
     private func handleError(_ error: Error, source: String, presentToUser: Bool) {
+        if currentOperationContext.source != source {
+            applyOperationContext(.source(source))
+        }
         syncCrashlyticsContext()
         let nsError = error as NSError
         crashReporter.log(
@@ -526,6 +530,7 @@ final class AppSession: ObservableObject {
     }
 
     private func applyOperationContext(_ context: OperationContext) {
+        currentOperationContext = context
         crashReporter.setCustomValue(context.source, forKey: "last_operation")
         crashReporter.setCustomValue(context.eventType, forKey: "operation_event_type")
         crashReporter.setCustomValue(context.tapCount, forKey: "operation_tap_count")

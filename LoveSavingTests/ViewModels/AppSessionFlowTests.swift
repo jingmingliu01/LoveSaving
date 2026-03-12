@@ -151,6 +151,9 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertEqual(crashReporter.customValues["group_id_present"] as? Bool, false)
         XCTAssertEqual(crashReporter.recordedErrorTypes, [String(reflecting: InviteFetchFailingService.Failure.self)])
         XCTAssertTrue(crashReporter.logs.contains { $0.contains("auth.refresh.inboundInvites") })
+        XCTAssertEqual(crashReporter.customValues["last_operation"] as? String, "auth.refresh.inboundInvites")
+        XCTAssertEqual(crashReporter.customValues["operation_event_type"] as? String, "none")
+        XCTAssertEqual(crashReporter.customValues["operation_tap_count"] as? Int, -1)
     }
 
     func testSubmitTapBurstAppErrorSetsOperationContextWithoutRecordingNonFatal() async {

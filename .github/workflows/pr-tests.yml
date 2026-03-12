@@ -12,6 +12,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Materialize Firebase config for CI
+        env:
+          FIREBASE_CONFIG_PLIST: ${{ secrets.FIREBASE_CONFIG_PLIST }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FIREBASE_CONFIG_PLIST}" ]; then
+            echo "Missing FIREBASE_CONFIG_PLIST secret"
+            exit 1
+          fi
+
+          mkdir -p LoveSaving/Config
+
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          data = os.environ["FIREBASE_CONFIG_PLIST"]
+          target = Path("LoveSaving/Config/GoogleService-Info.plist")
+          target.write_bytes(base64.b64decode(data))
+          PY
+
+          /usr/libexec/PlistBuddy -c "Print :GOOGLE_APP_ID" LoveSaving/Config/GoogleService-Info.plist >/dev/null
+
       - name: Select Xcode 26.3
         run: |
           set -euo pipefail

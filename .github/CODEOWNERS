@@ -1,0 +1,4 @@
+# High-risk infra and release plumbing
+/.github/workflows/** @jingmingliu01
+/Firebase/** @jingmingliu01
+/LoveSaving.xcodeproj/** @jingmingliu01

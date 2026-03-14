@@ -551,6 +551,139 @@ Putting the chat reply itself into Cloud Tasks would:
 
 Cloud Tasks is only for cold-path work in Phase 1.
 
+## 10A. Streaming Transport Model
+
+This section makes the Phase 1 streaming model explicit.
+
+### 10A.1 What "ChatGPT-like streaming" means here
+
+The intended user experience is:
+- the user sends one message
+- the assistant reply starts appearing incrementally
+- the reply is rendered progressively as tokens arrive
+
+This is the familiar "one word at a time" or "one chunk at a time" experience.
+
+From a transport perspective, this means:
+- the client opens one HTTP request to `api-service`
+- `api-service` keeps that request open
+- `api-service` forwards partial response chunks to the client as they arrive from the upstream provider
+
+Phase 1 should implement true streaming, not:
+- polling for completion
+- waiting for the entire answer and returning once at the end
+- background generation followed by a later fetch
+
+### 10A.2 How Phase 1 streaming actually works
+
+Phase 1 does **not** use a worker to generate chat tokens.
+
+Instead:
+
+1. the client sends a chat request to `api-service`
+2. `api-service` verifies auth and builds context
+3. `api-service` calls the external LLM provider using that provider's streaming API
+4. the provider returns incremental token or delta chunks
+5. `api-service` immediately forwards those chunks to the client
+6. the client appends each chunk to the visible message
+
+So Phase 1 streaming is:
+
+- `provider stream -> api-service -> client`
+
+not:
+
+- `worker -> Redis/WebSocket/gRPC -> api-service -> client`
+
+### 10A.3 Why Redis Pub/Sub is not needed in Phase 1
+
+Redis Pub/Sub or a similar internal relay becomes useful when:
+- the API service is not the token producer
+- a separate internal worker or GPU service is generating tokens
+- the API must keep the user connection open while another internal component emits token updates
+
+That is not the Phase 1 architecture.
+
+In Phase 1:
+- the token producer is the external LLM provider
+- `api-service` is already the direct consumer of that provider stream
+- so `api-service` can forward the stream directly to the client
+
+Because there is no separate internal token-producing worker in the chat hot path, there is no need for:
+- Redis Pub/Sub
+- internal WebSocket backbone
+- internal gRPC token relay
+- Pub/Sub-based token fanout
+
+### 10A.4 What Redis-style token relay would solve later
+
+A Redis or message-bus relay would only become relevant if the architecture changes to:
+
+- `client -> api-service`
+- `api-service -> internal inference worker`
+- internal inference worker generates tokens
+- tokens must be pushed back to `api-service`
+- `api-service` then streams them to the client
+
+In that design, the system needs an internal real-time bridge between:
+- the component holding the client connection
+- and the component generating the tokens
+
+Only then do patterns such as these become relevant:
+- Redis Pub/Sub
+- internal gRPC streaming
+- internal WebSocket streams
+- a dedicated token event bus
+
+That is a possible future architecture, but it is intentionally out of scope for Phase 1.
+
+### 10A.5 Why Cloud Tasks is not part of chat token streaming
+
+Cloud Tasks is designed for asynchronous push-based background task execution.
+
+It is suitable for:
+- title generation
+- long-term summary refresh
+- maintenance jobs
+
+It is not suitable for the chat token hot path because:
+- it adds queue latency
+- it complicates true incremental streaming
+- it turns a realtime response problem into a job orchestration problem
+
+Phase 1 therefore keeps the chat hot path synchronous and streaming, while only cold-path work uses Cloud Tasks.
+
+### 10A.6 Client-side implication
+
+The client should be designed to consume incremental chunks and progressively render the message body.
+
+The UI should not wait for:
+- Firestore persistence
+- title generation
+- memory refresh
+
+Those happen after or alongside the streamed answer, but they are not part of the visible reply path.
+
+### 10A.7 Phase mapping
+
+This is the intended phase boundary:
+
+- Phase 1:
+  - streaming via `provider -> api-service -> client`
+  - no Redis
+  - no internal token bus
+- Phase 2:
+  - same transport model, but with stronger provider routing, fallback, and admission control
+- Phase 3:
+  - still not automatically a Redis system
+  - `Neon + Worker Pool` strengthens async task execution, not necessarily token relay
+
+Important:
+- `Postgres + Worker Pool` solves queueing and scheduling problems
+- `Redis Pub/Sub` solves internal realtime token transport problems
+
+These are different architectural concerns and should not be conflated.
+
 ## 11. Multi-Modal Routing In Phase 1
 
 Phase 1 should support **basic routing**, not an elaborate inference mesh.

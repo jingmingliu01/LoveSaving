@@ -85,6 +85,12 @@ struct ProfileView: View {
 #endif
             }
             .navigationTitle("Profile")
+            .refreshable {
+                await session.refreshProfile()
+            }
+            .safeAreaInset(edge: .top) {
+                RefreshStatusView(state: session.refreshState(for: .profile))
+            }
             .alert("Trigger test crash?", isPresented: $isShowingCrashlyticsTestAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Crash App", role: .destructive) {

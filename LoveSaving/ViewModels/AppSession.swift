@@ -18,8 +18,17 @@ final class AppSession: ObservableObject {
     private let crashReporter: any CrashlyticsReporting
     private var authTask: Task<Void, Never>?
     private var messagingTask: Task<Void, Never>?
+    private var groupRealtimeSubscription: (any RealtimeSubscription)?
+    private var eventsRealtimeSubscription: (any RealtimeSubscription)?
+    private var realtimeGroupID: String?
+    private var pendingRealtimeGroup: LoveGroup?
+    private var pendingRealtimeEvents: [LoveEvent]?
+    private var groupRealtimeDebounceTask: Task<Void, Never>?
+    private var eventsRealtimeDebounceTask: Task<Void, Never>?
     private var crashRoute = "unknown"
     private var currentOperationContext = OperationContext.source("none")
+    private let realtimeEventLimit = 200
+    private let realtimeDebounceNanoseconds: UInt64 = 350_000_000
 
     init(container: AppContainer) {
         self.container = container
@@ -74,16 +83,21 @@ final class AppSession: ObservableObject {
     func signOut() {
         do {
             try container.authService.signOut()
-            authUser = nil
-            profile = nil
-            group = nil
-            inboundInvites = []
-            events = []
-            globalErrorMessage = nil
-            syncCrashlyticsContext()
+            resetSession()
         } catch {
             handleError(error, source: "auth.signOut", presentToUser: true)
         }
+    }
+
+    func resetSession() {
+        stopRealtimeObservers()
+        authUser = nil
+        profile = nil
+        group = nil
+        inboundInvites = []
+        events = []
+        globalErrorMessage = nil
+        syncCrashlyticsContext()
     }
 
     func changePassword(_ newPassword: String) async {
@@ -344,11 +358,7 @@ final class AppSession: ObservableObject {
                     if let authState {
                         try await refreshForAuthUser(authState)
                     } else {
-                        authUser = nil
-                        profile = nil
-                        group = nil
-                        inboundInvites = []
-                        events = []
+                        resetSession()
                     }
                     hasResolvedInitialAuthState = true
                     syncCrashlyticsContext()
@@ -388,8 +398,10 @@ final class AppSession: ObservableObject {
            group.status == .active {
             self.group = group
             inboundInvites = []
-            events = try await container.eventService.fetchEvents(groupId: currentGroupId, limit: 200)
+            events = try await container.eventService.fetchEvents(groupId: currentGroupId, limit: realtimeEventLimit)
+            startRealtimeObserversIfNeeded(for: currentGroupId)
         } else {
+            stopRealtimeObservers()
             self.group = nil
             events = []
             await refreshInboundInvites(
@@ -536,6 +548,121 @@ final class AppSession: ObservableObject {
         crashReporter.setCustomValue(context.tapCount, forKey: "operation_tap_count")
         crashReporter.setCustomValue(context.hasImage, forKey: "operation_has_image")
         crashReporter.setCustomValue(context.inviteResponse, forKey: "operation_invite_response")
+    }
+
+    private func startRealtimeObserversIfNeeded(for groupId: String) {
+        guard authUser != nil else {
+            stopRealtimeObservers()
+            return
+        }
+
+        guard realtimeGroupID != groupId || groupRealtimeSubscription == nil || eventsRealtimeSubscription == nil else {
+            return
+        }
+
+        stopRealtimeObservers()
+        realtimeGroupID = groupId
+
+        groupRealtimeSubscription = container.groupService.observeGroup(groupId: groupId) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let observedGroup):
+                guard self.realtimeGroupID == groupId else { return }
+                guard let observedGroup, observedGroup.status == .active else {
+                    self.handleRealtimeGroupUnavailable(groupId: groupId)
+                    return
+                }
+                self.scheduleRealtimeGroupUpdate(observedGroup, groupId: groupId)
+            case .failure(let error):
+                self.handleError(error, source: "realtime.group", presentToUser: false)
+            }
+        }
+
+        eventsRealtimeSubscription = container.eventService.observeRecentEvents(
+            groupId: groupId,
+            limit: realtimeEventLimit
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let observedEvents):
+                guard self.realtimeGroupID == groupId else { return }
+                self.scheduleRealtimeEventsUpdate(observedEvents, groupId: groupId)
+            case .failure(let error):
+                self.handleError(error, source: "realtime.events", presentToUser: false)
+            }
+        }
+    }
+
+    private func stopRealtimeObservers() {
+        groupRealtimeDebounceTask?.cancel()
+        groupRealtimeDebounceTask = nil
+        eventsRealtimeDebounceTask?.cancel()
+        eventsRealtimeDebounceTask = nil
+        pendingRealtimeGroup = nil
+        pendingRealtimeEvents = nil
+        groupRealtimeSubscription?.cancel()
+        groupRealtimeSubscription = nil
+        eventsRealtimeSubscription?.cancel()
+        eventsRealtimeSubscription = nil
+        realtimeGroupID = nil
+    }
+
+    private func scheduleRealtimeGroupUpdate(_ updatedGroup: LoveGroup, groupId: String) {
+        pendingRealtimeGroup = updatedGroup
+        groupRealtimeDebounceTask?.cancel()
+        groupRealtimeDebounceTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: realtimeDebounceNanoseconds)
+            guard !Task.isCancelled,
+                  realtimeGroupID == groupId,
+                  let pendingRealtimeGroup else {
+                return
+            }
+
+            self.pendingRealtimeGroup = nil
+            if group != pendingRealtimeGroup {
+                group = pendingRealtimeGroup
+                syncCrashlyticsContext()
+            }
+        }
+    }
+
+    private func scheduleRealtimeEventsUpdate(_ updatedEvents: [LoveEvent], groupId: String) {
+        pendingRealtimeEvents = updatedEvents
+        eventsRealtimeDebounceTask?.cancel()
+        eventsRealtimeDebounceTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: realtimeDebounceNanoseconds)
+            guard !Task.isCancelled,
+                  realtimeGroupID == groupId,
+                  let pendingRealtimeEvents else {
+                return
+            }
+
+            self.pendingRealtimeEvents = nil
+            if events != pendingRealtimeEvents {
+                events = pendingRealtimeEvents
+                syncCrashlyticsContext()
+            }
+        }
+    }
+
+    private func handleRealtimeGroupUnavailable(groupId: String) {
+        guard realtimeGroupID == groupId else { return }
+        stopRealtimeObservers()
+        group = nil
+        events = []
+        syncCrashlyticsContext()
+
+        if let uid = authUser?.uid {
+            Task { @MainActor [weak self] in
+                await self?.refreshInboundInvites(
+                    for: uid,
+                    source: "realtime.group.unlinked",
+                    presentToUser: false
+                )
+            }
+        }
     }
 }
 

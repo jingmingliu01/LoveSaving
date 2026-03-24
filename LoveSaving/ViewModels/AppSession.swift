@@ -27,6 +27,7 @@ final class AppSession: ObservableObject {
     @Published private(set) var group: LoveGroup?
     @Published private(set) var inboundInvites: [Invite] = []
     @Published private(set) var events: [LoveEvent] = []
+    @Published private(set) var aiInsightsAvailability: AIInsightsAvailability = .checking
     @Published private(set) var hasResolvedInitialAuthState = false
 
     @Published var globalErrorMessage: String?
@@ -50,6 +51,7 @@ final class AppSession: ObservableObject {
     private var inviteRealtimeRefreshTask: Task<Void, Never>?
     private var inFlightRefreshTasks: [RefreshScope: Task<Void, Never>] = [:]
     private var lastRefreshAt: [RefreshScope: Date] = [:]
+    private var aiInsightsAvailabilityTask: Task<Void, Never>?
     private var crashRoute = "unknown"
     private var currentOperationContext = OperationContext.source("none")
     private let realtimeEventLimit = 200
@@ -61,6 +63,7 @@ final class AppSession: ObservableObject {
         syncCrashlyticsContext()
         observeAuthState()
         observeMessagingToken()
+        refreshAIInsightsAvailabilityIfNeeded()
     }
 
     deinit {
@@ -68,6 +71,7 @@ final class AppSession: ObservableObject {
         messagingTask?.cancel()
         inviteRealtimeRefreshTask?.cancel()
         inFlightRefreshTasks.values.forEach { $0.cancel() }
+        aiInsightsAvailabilityTask?.cancel()
     }
 
     var isSignedIn: Bool {
@@ -528,6 +532,20 @@ final class AppSession: ObservableObject {
         }
     }
 
+    func refreshAIInsightsAvailability() async {
+        aiInsightsAvailability = .checking
+        aiInsightsAvailability = await container.aiInsightsAvailabilityService.fetchAvailability()
+        syncCrashlyticsContext()
+    }
+
+    func refreshAIInsightsAvailabilityIfNeeded() {
+        aiInsightsAvailabilityTask?.cancel()
+        aiInsightsAvailabilityTask = Task { [weak self] in
+            guard let self else { return }
+            await refreshAIInsightsAvailability()
+        }
+    }
+
     private func observeAuthState() {
         authTask = Task { [weak self] in
             guard let self else { return }
@@ -539,10 +557,12 @@ final class AppSession: ObservableObject {
                     } else {
                         resetSession()
                     }
+                    refreshAIInsightsAvailabilityIfNeeded()
                     hasResolvedInitialAuthState = true
                     syncCrashlyticsContext()
                 } catch {
                     handleError(error, source: "auth.observe", presentToUser: true)
+                    refreshAIInsightsAvailabilityIfNeeded()
                     hasResolvedInitialAuthState = true
                     syncCrashlyticsContext()
                 }
@@ -794,6 +814,7 @@ final class AppSession: ObservableObject {
         crashReporter.setCustomValue(group != nil, forKey: "group_id_present")
         crashReporter.setCustomValue(inboundInvites.count, forKey: "inbound_invite_count")
         crashReporter.setCustomValue(events.count, forKey: "cached_event_count")
+        crashReporter.setCustomValue(aiInsightsAvailability.isEnabled, forKey: "ai_insights_enabled")
     }
 
     private func applyOperationContext(_ context: OperationContext) {

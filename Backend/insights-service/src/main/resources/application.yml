@@ -1,0 +1,37 @@
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: insights-service
+  jackson:
+    default-property-inclusion: non_null
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+ai:
+  role: ${APP_ROLE:api}
+  firebase-project-id: ${FIREBASE_PROJECT_ID:}
+  openai-api-key: ${OPENAI_API_KEY:}
+  primary-model-provider: ${PRIMARY_MODEL_PROVIDER:openai}
+  primary-text-model: ${PRIMARY_TEXT_MODEL:gpt-5.4-nano}
+  primary-multimodal-model: ${PRIMARY_MULTIMODAL_MODEL:gpt-5.4-nano}
+  secondary-model-provider: ${SECONDARY_MODEL_PROVIDER:}
+  secondary-text-model: ${SECONDARY_TEXT_MODEL:}
+  recent-context-days-default: ${RECENT_CONTEXT_DAYS_DEFAULT:7}
+  memory-refresh-min-interval-hours: ${MEMORY_REFRESH_MIN_INTERVAL_HOURS:48}
+  memory-refresh-min-new-events: ${MEMORY_REFRESH_MIN_NEW_EVENTS:10}
+  cloud-tasks:
+    location: ${CLOUD_TASKS_LOCATION:us-central1}
+    queue-id: ${CLOUD_TASKS_QUEUE_ID:ai-insights-default}
+    task-service-url: ${TASK_SERVICE_URL:}

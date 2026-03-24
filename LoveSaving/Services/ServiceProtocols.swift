@@ -6,6 +6,53 @@ struct AuthUser: Equatable {
     let displayName: String?
 }
 
+struct AIInsightsCapabilities: Equatable, Decodable {
+    let enabled: Bool
+    let streamingSupported: Bool
+    let multimodalSupported: Bool
+    let environment: String
+    let primaryModelProvider: String
+    let primaryTextModel: String
+    let primaryMultimodalModel: String
+    let status: String
+    let reason: String?
+}
+
+enum AIInsightsAvailability: Equatable {
+    case checking
+    case unavailable(reason: String)
+    case available(AIInsightsCapabilities)
+
+    var isEnabled: Bool {
+        if case .available = self {
+            return true
+        }
+        return false
+    }
+
+    var title: String {
+        switch self {
+        case .checking:
+            return "Checking Insights"
+        case .unavailable:
+            return "Insights Unavailable"
+        case .available:
+            return "Insights Available"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .checking:
+            return "Checking whether the AI Insights backend is configured for this build."
+        case .unavailable(let reason):
+            return reason
+        case .available(let capabilities):
+            return "Backend is configured with \(capabilities.primaryModelProvider) / \(capabilities.primaryTextModel). The streaming chat UI will replace this placeholder next."
+        }
+    }
+}
+
 enum AppError: LocalizedError {
     case missingAuthUser
     case missingGroup
@@ -100,4 +147,9 @@ protocol MessagingServicing {
     func requestNotificationAuthorization() async throws
     func scheduleDailyReflectionReminder() async throws
     var tokenStream: AsyncStream<String> { get }
+}
+
+@MainActor
+protocol AIInsightsAvailabilityServicing {
+    func fetchAvailability() async -> AIInsightsAvailability
 }

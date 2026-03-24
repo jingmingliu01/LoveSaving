@@ -396,3 +396,10 @@ final class UITestMessagingService: MessagingServicing {
     func requestNotificationAuthorization() async throws {}
     func scheduleDailyReflectionReminder() async throws {}
 }
+
+@MainActor
+final class UITestAIInsightsAvailabilityService: AIInsightsAvailabilityServicing {
+    func fetchAvailability() async -> AIInsightsAvailability {
+        .unavailable(reason: "AI Insights backend is disabled in UI test mode.")
+    }
+}

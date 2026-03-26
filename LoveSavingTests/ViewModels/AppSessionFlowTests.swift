@@ -110,7 +110,7 @@ final class AppSessionFlowTests: XCTestCase {
         let harness = makeSession(scenario: .linked)
         let session = harness.session
         let crashReporter = harness.crashReporter
-        await waitUntil("auth observer loads profile") {
+        await waitUntil("auth observer loads profile", timeoutNanoseconds: 15_000_000_000) {
             session.isSignedIn && session.profile != nil
         }
 

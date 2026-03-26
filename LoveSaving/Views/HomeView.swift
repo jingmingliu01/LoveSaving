@@ -88,6 +88,7 @@ struct HomeView: View {
             .padding()
         }
         .navigationTitle(viewModel.isTutorialMode ? "" : "Home")
+        .scrollBounceBehavior(.always)
         .refreshable {
             guard !viewModel.isTutorialMode else { return }
             await session.refreshHome()

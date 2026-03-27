@@ -17,37 +17,42 @@ struct JourneyView: View {
     }
 
     var body: some View {
-        ScrollView {
+        Group {
             switch mode {
             case .list:
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(session.events) { event in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(event.note ?? "No note")
-                                .font(.headline)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(session.events) { event in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(event.note ?? "No note")
+                                    .font(.headline)
 
-                            Text(AppDisplayTime.estDateTime(event.occurredAt))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            if let address = event.location.addressText {
-                                Text(address)
+                                Text(AppDisplayTime.estDateTime(event.occurredAt))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+
+                                if let address = event.location.addressText {
+                                    Text(address)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Text(event.delta >= 0 ? "+\(event.delta)" : "\(event.delta)")
+                                    .foregroundStyle(event.delta >= 0 ? .green : .red)
+                                    .font(.subheadline.weight(.semibold))
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            .padding(.vertical, 12)
 
-                            Text(event.delta >= 0 ? "+\(event.delta)" : "\(event.delta)")
-                                .foregroundStyle(event.delta >= 0 ? .green : .red)
-                                .font(.subheadline.weight(.semibold))
+                            Divider()
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
-                        .padding(.vertical, 12)
-
-                        Divider()
                     }
+                    .accessibilityIdentifier("journey.list")
                 }
-                .accessibilityIdentifier("journey.list")
+                .refreshable {
+                    await refreshJourneyAndCamera()
+                }
             case .map:
                 Map(position: $cameraPosition) {
                     ForEach(session.events) { event in
@@ -67,13 +72,12 @@ struct JourneyView: View {
                     MapScaleView()
                 }
                 .accessibilityIdentifier("journey.map")
+                .refreshable {
+                    await refreshJourneyAndCamera()
+                }
             }
         }
         .navigationTitle("Journey")
-        .refreshable {
-            await session.refreshJourney()
-            updateCameraPositionFromFirstEvent()
-        }
         .safeAreaInset(edge: .top) {
             RefreshStatusView(state: session.refreshState(for: .journey))
         }
@@ -90,14 +94,18 @@ struct JourneyView: View {
             .accessibilityIdentifier("journey.modePicker")
         }
         .task(id: session.group?.id) {
-            await session.refreshJourney()
-            updateCameraPositionFromFirstEvent()
+            await refreshJourneyAndCamera()
         }
         .onChange(of: mode) { _, newMode in
             if newMode == .map {
                 locationManager.requestAuthorizationIfNeeded()
             }
         }
+    }
+
+    private func refreshJourneyAndCamera() async {
+        await session.refreshJourney()
+        updateCameraPositionFromFirstEvent()
     }
 
     private func updateCameraPositionFromFirstEvent() {

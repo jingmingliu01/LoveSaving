@@ -238,6 +238,34 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertNil(session.globalErrorMessage)
     }
 
+    func testCancelledRefreshDoesNotOverwriteIdleStateAfterSignOut() async {
+        let store = UITestStore.makeSeeded(scenario: .linked)
+        let auth = UITestAuthService(store: store)
+        let container = AppContainer(
+            authService: auth,
+            userDataService: CountingUserDataService(store: store),
+            inviteService: UITestInviteService(store: store),
+            groupService: CountingGroupService(store: store),
+            eventService: CountingEventService(store: store, fetchDelayNanoseconds: 300_000_000),
+            mediaService: UITestMediaService(),
+            messagingService: UITestMessagingService(),
+            runtimeMode: .uiTest(.linked)
+        )
+        let session = AppSession(container: container)
+
+        await waitUntil("auth observer loads linked session") {
+            session.isSignedIn && session.group != nil
+        }
+
+        async let refresh: Void = session.refreshJourney()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        session.signOut()
+        _ = await refresh
+
+        XCTAssertEqual(session.refreshState(for: .journey), .idle)
+        XCTAssertFalse(session.isSignedIn)
+    }
+
     func testPageScopedRefreshesOnlyFetchTheirOwnData() async {
         let store = UITestStore.makeSeeded(scenario: .linked)
         let auth = UITestAuthService(store: store)

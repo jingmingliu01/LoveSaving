@@ -572,16 +572,21 @@ final class AppSession: ObservableObject {
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             applyOperationContext(.source(source))
+            defer {
+                inFlightRefreshTasks[scope] = nil
+            }
 
             do {
                 try await operation()
+                guard !Task.isCancelled else { return }
                 setRefreshState(.success(Date()), for: scope)
+            } catch is CancellationError {
+                // Sign-out/reset intentionally cancels in-flight refreshes.
             } catch {
+                guard !Task.isCancelled else { return }
                 setRefreshState(.error(error.localizedDescription), for: scope)
                 handleError(error, source: source, presentToUser: false)
             }
-
-            inFlightRefreshTasks[scope] = nil
         }
 
         inFlightRefreshTasks[scope] = task

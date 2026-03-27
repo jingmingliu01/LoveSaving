@@ -16,7 +16,7 @@ struct LinkingView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Button("Use Different Account", role: .destructive) {
+                Button("Sign Out", role: .destructive) {
                     session.signOut()
                 }
                 .accessibilityIdentifier("linking.signOut")

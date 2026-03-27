@@ -25,6 +25,7 @@ final class AppSession: ObservableObject {
     private var pendingRealtimeEvents: [LoveEvent]?
     private var groupRealtimeDebounceTask: Task<Void, Never>?
     private var eventsRealtimeDebounceTask: Task<Void, Never>?
+    private var inviteRealtimeRefreshTask: Task<Void, Never>?
     private var crashRoute = "unknown"
     private var currentOperationContext = OperationContext.source("none")
     private let realtimeEventLimit = 200
@@ -41,6 +42,7 @@ final class AppSession: ObservableObject {
     deinit {
         authTask?.cancel()
         messagingTask?.cancel()
+        inviteRealtimeRefreshTask?.cancel()
     }
 
     var isSignedIn: Bool {
@@ -598,6 +600,8 @@ final class AppSession: ObservableObject {
         groupRealtimeDebounceTask = nil
         eventsRealtimeDebounceTask?.cancel()
         eventsRealtimeDebounceTask = nil
+        inviteRealtimeRefreshTask?.cancel()
+        inviteRealtimeRefreshTask = nil
         pendingRealtimeGroup = nil
         pendingRealtimeEvents = nil
         groupRealtimeSubscription?.cancel()
@@ -655,7 +659,8 @@ final class AppSession: ObservableObject {
         syncCrashlyticsContext()
 
         if let uid = authUser?.uid {
-            Task { @MainActor [weak self] in
+            inviteRealtimeRefreshTask?.cancel()
+            inviteRealtimeRefreshTask = Task { @MainActor [weak self] in
                 await self?.refreshInboundInvites(
                     for: uid,
                     source: "realtime.group.unlinked",

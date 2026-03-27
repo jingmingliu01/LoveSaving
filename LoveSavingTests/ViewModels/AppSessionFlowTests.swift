@@ -223,6 +223,53 @@ final class AppSessionFlowTests: XCTestCase {
         }
     }
 
+    func testResetSessionCancelsPendingRealtimeInviteRefresh() async {
+        let store = UITestStore.makeSeeded(scenario: .linked)
+        let auth = UITestAuthService(store: store)
+        let delayedInviteService = DelayedInviteService(store: store, delayNanoseconds: 300_000_000)
+        let container = AppContainer(
+            authService: auth,
+            userDataService: UITestUserDataService(store: store),
+            inviteService: delayedInviteService,
+            groupService: UITestGroupService(store: store),
+            eventService: UITestEventService(store: store),
+            mediaService: UITestMediaService(),
+            messagingService: UITestMessagingService(),
+            crashReporter: CrashlyticsReporterSpy(),
+            runtimeMode: .uiTest(.linked)
+        )
+        let session = AppSession(container: container)
+
+        await waitUntil("auth observer loads linked group") {
+            session.isSignedIn && session.group?.id == "group_1"
+        }
+
+        store.users["owner"]?.currentGroupId = nil
+        let invite = Invite(
+            id: "invite_pending_delayed",
+            fromUid: "partner",
+            fromDisplayName: "Partner",
+            fromEmail: "partner@example.com",
+            toUid: "owner",
+            status: .pending,
+            createdAt: Date(),
+            expiresAt: Date().addingTimeInterval(7 * 24 * 3600)
+        )
+        store.invites[invite.id] = invite
+        store.groups.removeValue(forKey: "group_1")
+        store.emitGroupSnapshot(groupId: "group_1")
+
+        await waitUntil("group unavailable starts pending invite refresh") {
+            session.group == nil && session.events.isEmpty
+        }
+
+        session.resetSession()
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
+        XCTAssertFalse(session.isSignedIn)
+        XCTAssertTrue(session.inboundInvites.isEmpty)
+    }
+
     func testRealtimeIdenticalSnapshotsDoNotRepublishEvents() async {
         let harness = makeRealtimeHarness(scenario: .linked)
         let session = harness.session
@@ -449,5 +496,45 @@ private struct InviteFetchFailingService: InviteServicing {
 
     func respondInvite(inviteId: String, status: InviteStatus, respondedAt: Date) async throws {
         fatalError("respondInvite should not be called in this test")
+    }
+}
+
+@MainActor
+private final class DelayedInviteService: InviteServicing {
+    private let store: UITestStore
+    private let delayNanoseconds: UInt64
+
+    init(store: UITestStore, delayNanoseconds: UInt64) {
+        self.store = store
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func sendInvite(
+        fromUid: String,
+        toUid: String,
+        expiresAt: Date?,
+        fromDisplayName: String?,
+        fromEmail: String?
+    ) async throws -> Invite {
+        try await UITestInviteService(store: store).sendInvite(
+            fromUid: fromUid,
+            toUid: toUid,
+            expiresAt: expiresAt,
+            fromDisplayName: fromDisplayName,
+            fromEmail: fromEmail
+        )
+    }
+
+    func fetchInboundInvites(for uid: String) async throws -> [Invite] {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        return try await UITestInviteService(store: store).fetchInboundInvites(for: uid)
+    }
+
+    func respondInvite(inviteId: String, status: InviteStatus, respondedAt: Date) async throws {
+        try await UITestInviteService(store: store).respondInvite(
+            inviteId: inviteId,
+            status: status,
+            respondedAt: respondedAt
+        )
     }
 }

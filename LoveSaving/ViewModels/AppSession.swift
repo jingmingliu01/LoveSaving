@@ -4,6 +4,24 @@ import Combine
 
 @MainActor
 final class AppSession: ObservableObject {
+    enum RefreshScope: Hashable {
+        case home
+        case journey
+        case profile
+    }
+
+    enum RefreshState: Equatable {
+        case idle
+        case loading
+        case success(Date)
+        case error(String)
+
+        var errorMessage: String? {
+            guard case .error(let message) = self else { return nil }
+            return message
+        }
+    }
+
     @Published private(set) var authUser: AuthUser?
     @Published private(set) var profile: UserProfile?
     @Published private(set) var group: LoveGroup?
@@ -13,11 +31,17 @@ final class AppSession: ObservableObject {
 
     @Published var globalErrorMessage: String?
     @Published var isBusy = false
+    @Published private(set) var homeRefreshState: RefreshState = .idle
+    @Published private(set) var journeyRefreshState: RefreshState = .idle
+    @Published private(set) var profileRefreshState: RefreshState = .idle
 
     private let container: AppContainer
     private let crashReporter: any CrashlyticsReporting
+    private let refreshDebounceInterval: TimeInterval = 0.6
     private var authTask: Task<Void, Never>?
     private var messagingTask: Task<Void, Never>?
+    private var inFlightRefreshTasks: [RefreshScope: Task<Void, Never>] = [:]
+    private var lastRefreshAt: [RefreshScope: Date] = [:]
     private var crashRoute = "unknown"
     private var currentOperationContext = OperationContext.source("none")
 
@@ -80,6 +104,7 @@ final class AppSession: ObservableObject {
             inboundInvites = []
             events = []
             globalErrorMessage = nil
+            resetRefreshStates()
             syncCrashlyticsContext()
         } catch {
             handleError(error, source: "auth.signOut", presentToUser: true)
@@ -276,13 +301,60 @@ final class AppSession: ObservableObject {
         }
     }
 
-    func refreshEvents() async {
-        guard let group else { return }
-        do {
-            events = try await container.eventService.fetchEvents(groupId: group.id, limit: 200)
+    func refreshHome() async {
+        await refresh(scope: .home, source: "home.refresh") { [self] in
+            guard let groupId = group?.id ?? profile?.currentGroupId else { return }
+
+            if let refreshedGroup = try await container.groupService.fetchGroup(groupId: groupId),
+               refreshedGroup.status == .active {
+                group = refreshedGroup
+            } else {
+                group = nil
+            }
             syncCrashlyticsContext()
-        } catch {
-            handleError(error, source: "event.refresh", presentToUser: true)
+        }
+    }
+
+    func refreshJourney() async {
+        await refresh(scope: .journey, source: "journey.refresh") { [self] in
+            guard let groupId = group?.id ?? profile?.currentGroupId else {
+                events = []
+                syncCrashlyticsContext()
+                return
+            }
+
+            events = try await container.eventService.fetchEvents(groupId: groupId, limit: 200)
+            syncCrashlyticsContext()
+        }
+    }
+
+    func refreshProfile() async {
+        await refresh(scope: .profile, source: "profile.refresh") { [self] in
+            guard let currentUser = authUser ?? container.authService.currentUser else { return }
+
+            try await container.authService.ensureSessionReady()
+            let refreshedProfile = try await ensureProfileExists(for: currentUser)
+            profile = refreshedProfile
+
+            if let currentGroupId = refreshedProfile.currentGroupId,
+               let refreshedGroup = try await container.groupService.fetchGroup(groupId: currentGroupId),
+               refreshedGroup.status == .active {
+                group = refreshedGroup
+            } else {
+                group = nil
+            }
+            syncCrashlyticsContext()
+        }
+    }
+
+    func refreshState(for scope: RefreshScope) -> RefreshState {
+        switch scope {
+        case .home:
+            return homeRefreshState
+        case .journey:
+            return journeyRefreshState
+        case .profile:
+            return profileRefreshState
         }
     }
 
@@ -349,6 +421,7 @@ final class AppSession: ObservableObject {
                         group = nil
                         inboundInvites = []
                         events = []
+                        resetRefreshStates()
                     }
                     hasResolvedInitialAuthState = true
                     syncCrashlyticsContext()
@@ -475,6 +548,69 @@ final class AppSession: ObservableObject {
             return current
         }
         throw AppError.missingAuthUser
+    }
+
+    private func refresh(
+        scope: RefreshScope,
+        source: String,
+        operation: @escaping @MainActor () async throws -> Void
+    ) async {
+        if let existingTask = inFlightRefreshTasks[scope] {
+            await existingTask.value
+            return
+        }
+
+        let now = Date()
+        if let lastRefreshAt = lastRefreshAt[scope],
+           now.timeIntervalSince(lastRefreshAt) < refreshDebounceInterval {
+            return
+        }
+
+        lastRefreshAt[scope] = now
+        setRefreshState(.loading, for: scope)
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            applyOperationContext(.source(source))
+            defer {
+                inFlightRefreshTasks[scope] = nil
+            }
+
+            do {
+                try await operation()
+                guard !Task.isCancelled else { return }
+                setRefreshState(.success(Date()), for: scope)
+            } catch is CancellationError {
+                // Sign-out/reset intentionally cancels in-flight refreshes.
+            } catch {
+                guard !Task.isCancelled else { return }
+                setRefreshState(.error(error.localizedDescription), for: scope)
+                handleError(error, source: source, presentToUser: false)
+            }
+        }
+
+        inFlightRefreshTasks[scope] = task
+        await task.value
+    }
+
+    private func resetRefreshStates() {
+        homeRefreshState = .idle
+        journeyRefreshState = .idle
+        profileRefreshState = .idle
+        inFlightRefreshTasks.values.forEach { $0.cancel() }
+        inFlightRefreshTasks.removeAll()
+        lastRefreshAt.removeAll()
+    }
+
+    private func setRefreshState(_ state: RefreshState, for scope: RefreshScope) {
+        switch scope {
+        case .home:
+            homeRefreshState = state
+        case .journey:
+            journeyRefreshState = state
+        case .profile:
+            profileRefreshState = state
+        }
     }
 
     @discardableResult

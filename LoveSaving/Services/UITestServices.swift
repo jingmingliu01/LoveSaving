@@ -369,6 +369,36 @@ final class UITestEventService: EventServicing {
         Array((store.eventsByGroup[groupId] ?? []).sorted(by: { $0.occurredAt > $1.occurredAt }).prefix(limit))
     }
 
+    func updateEvent(groupId: String, eventId: String, note: String?, media: [EventMedia]) async throws {
+        guard var events = store.eventsByGroup[groupId],
+              let index = events.firstIndex(where: { $0.id == eventId }) else {
+            throw AppError.eventNotFound
+        }
+
+        events[index].note = note
+        events[index].media = media
+        events[index].updatedAt = Date()
+        store.eventsByGroup[groupId] = events
+    }
+
+    func deleteEventAndUpdateGroup(groupId: String, eventId: String) async throws {
+        guard var group = store.groups[groupId], group.status == .active else {
+            throw AppError.invalidGroupState
+        }
+        guard var events = store.eventsByGroup[groupId],
+              let index = events.firstIndex(where: { $0.id == eventId }) else {
+            throw AppError.eventNotFound
+        }
+
+        let removedEvent = events.remove(at: index)
+        store.eventsByGroup[groupId] = events
+
+        group.loveBalance -= removedEvent.delta
+        group.lastEventAt = events.map(\.occurredAt).max() ?? group.createdAt
+        group.updatedAt = Date()
+        store.groups[groupId] = group
+    }
+
     func appendMedia(groupId: String, eventId: String, media: EventMedia) async throws {
         guard var events = store.eventsByGroup[groupId],
               let index = events.firstIndex(where: { $0.id == eventId }) else {
@@ -385,6 +415,8 @@ final class UITestMediaService: MediaServicing {
     func uploadImageData(_ data: Data, groupId: String, eventId: String, fileExtension: String) async throws -> EventMedia {
         EventMedia(storagePath: "data:image/jpeg;base64,\(data.base64EncodedString())", contentType: "image/jpeg")
     }
+
+    func deleteMedia(at storagePath: String) async throws {}
 }
 
 @MainActor

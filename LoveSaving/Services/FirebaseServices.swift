@@ -516,6 +516,60 @@ final class FirebaseEventService: EventServicing {
         }
     }
 
+    func updateEvent(groupId: String, eventId: String, note: String?, media: [EventMedia]) async throws {
+        let eventRef = db.collection("groups")
+            .document(groupId)
+            .collection("events")
+            .document(eventId)
+
+        let snapshot = try await eventRef.getDocument()
+        guard snapshot.exists else {
+            throw AppError.eventNotFound
+        }
+
+        try await eventRef.updateData([
+            "note": firestoreNullable(note),
+            "media": media.map { ["storagePath": $0.storagePath, "contentType": $0.contentType] },
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+    }
+
+    func deleteEventAndUpdateGroup(groupId: String, eventId: String) async throws {
+        let groupRef = db.collection("groups").document(groupId)
+        let eventRef = groupRef.collection("events").document(eventId)
+
+        let eventSnapshot = try await eventRef.getDocument()
+        guard let event = eventSnapshot.toLoveEvent() else {
+            throw AppError.eventNotFound
+        }
+
+        let groupSnapshot = try await groupRef.getDocument()
+        guard let group = groupSnapshot.toLoveGroup(), group.status == .active else {
+            throw AppError.invalidGroupState
+        }
+
+        var nextLastEventAt = group.lastEventAt
+        if event.occurredAt >= group.lastEventAt {
+            let recentSnapshot = try await groupRef.collection("events")
+                .order(by: "occurredAt", descending: true)
+                .limit(to: 2)
+                .getDocuments()
+            let replacement = recentSnapshot.documents
+                .compactMap { $0.toLoveEvent() }
+                .first { $0.id != eventId }
+            nextLastEventAt = replacement?.occurredAt ?? group.createdAt
+        }
+
+        let batch = db.batch()
+        batch.deleteDocument(eventRef)
+        batch.updateData([
+            "loveBalance": group.loveBalance - event.delta,
+            "lastEventAt": Timestamp(date: nextLastEventAt),
+            "updatedAt": FieldValue.serverTimestamp()
+        ], forDocument: groupRef)
+        try await batch.commit()
+    }
+
     func appendMedia(groupId: String, eventId: String, media: EventMedia) async throws {
         let eventRef = db.collection("groups")
             .document(groupId)
@@ -579,6 +633,19 @@ final class FirebaseStorageMediaService: MediaServicing {
             }
 
             return EventMedia(storagePath: path, contentType: prepared.contentType)
+        }
+    }
+
+    func deleteMedia(at storagePath: String) async throws {
+        let ref = storage.reference(withPath: storagePath)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            ref.delete { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
         }
     }
 

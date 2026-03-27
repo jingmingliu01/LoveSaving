@@ -16,6 +16,7 @@ enum AppError: LocalizedError {
     case locationUnavailable
     case emptyTapBurst
     case imageTooLargeForUpload
+    case eventNotFound
 
     var errorDescription: String? {
         switch self {
@@ -37,6 +38,8 @@ enum AppError: LocalizedError {
             return "Tap at least once before submitting."
         case .imageTooLargeForUpload:
             return "Image is too large. Please choose a smaller image."
+        case .eventNotFound:
+            return "That journey item could not be found."
         }
     }
 }
@@ -87,12 +90,15 @@ protocol GroupServicing {
 protocol EventServicing {
     func createEventAndUpdateGroup(groupId: String, createdBy: String, draft: EventDraft, eventId: String?) async throws -> LoveEvent
     func fetchEvents(groupId: String, limit: Int) async throws -> [LoveEvent]
+    func updateEvent(groupId: String, eventId: String, note: String?, media: [EventMedia]) async throws
+    func deleteEventAndUpdateGroup(groupId: String, eventId: String) async throws
     func appendMedia(groupId: String, eventId: String, media: EventMedia) async throws
 }
 
 @MainActor
 protocol MediaServicing {
     func uploadImageData(_ data: Data, groupId: String, eventId: String, fileExtension: String) async throws -> EventMedia
+    func deleteMedia(at storagePath: String) async throws
 }
 
 @MainActor

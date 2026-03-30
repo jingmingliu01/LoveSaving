@@ -374,15 +374,9 @@ final class UITestEventService: EventServicing {
     }
 
     func updateEvent(groupId: String, eventId: String, note: String?, media: [EventMedia]) async throws {
-        guard let currentUser = store.authUser else {
-            throw AppError.missingAuthUser
-        }
         guard var events = store.eventsByGroup[groupId],
               let index = events.firstIndex(where: { $0.id == eventId }) else {
             throw AppError.eventNotFound
-        }
-        guard events[index].createdBy == currentUser.uid else {
-            throw AppError.eventPermissionDenied
         }
 
         events[index].note = note
@@ -393,18 +387,12 @@ final class UITestEventService: EventServicing {
     }
 
     func deleteEventAndUpdateGroup(groupId: String, eventId: String) async throws {
-        guard let currentUser = store.authUser else {
-            throw AppError.missingAuthUser
-        }
         guard var group = store.groups[groupId], group.status == .active else {
             throw AppError.invalidGroupState
         }
         guard var events = store.eventsByGroup[groupId],
               let index = events.firstIndex(where: { $0.id == eventId }) else {
             throw AppError.eventNotFound
-        }
-        guard events[index].createdBy == currentUser.uid else {
-            throw AppError.eventPermissionDenied
         }
 
         let removedEvent = events.remove(at: index)

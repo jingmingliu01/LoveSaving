@@ -151,7 +151,7 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertNil(session.globalErrorMessage)
     }
 
-    func testDeleteJourneyEventFailsForPartnerOwnedItem() async throws {
+    func testDeleteJourneyEventAllowsPartnerOwnedItem() async throws {
         let store = UITestStore.makeSeeded(scenario: .linked)
         let partnerEvent = LoveEvent(
             id: "event_partner_1",
@@ -176,9 +176,9 @@ final class AppSessionFlowTests: XCTestCase {
 
         let didDelete = await session.deleteJourneyEvent(partnerEvent)
 
-        XCTAssertFalse(didDelete)
-        XCTAssertEqual(session.globalErrorMessage, AppError.eventPermissionDenied.localizedDescription)
-        XCTAssertTrue(session.events.contains(where: { $0.id == partnerEvent.id }))
+        XCTAssertTrue(didDelete)
+        XCTAssertFalse(session.events.contains(where: { $0.id == partnerEvent.id }))
+        XCTAssertNil(session.globalErrorMessage)
     }
 
     func testSignOutClearsCrashlyticsUserID() async {

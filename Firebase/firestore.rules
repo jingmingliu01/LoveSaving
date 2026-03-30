@@ -400,11 +400,9 @@ service cloud.firestore {
         allow read: if isGroupParticipant(groupId);
 
         allow update: if isActiveGroupMember(groupId)
-          && resource.data.createdBy == request.auth.uid
           && validEventUpdate();
 
-        allow delete: if isActiveGroupMember(groupId)
-          && resource.data.createdBy == request.auth.uid;
+        allow delete: if isActiveGroupMember(groupId);
       }
 
       match /chats/{chatId} {

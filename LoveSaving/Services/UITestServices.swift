@@ -28,6 +28,10 @@ final class UITestStore {
         self.authUser = authUser
     }
 
+    func emitGroupSnapshot(groupId: String) {}
+
+    func emitEventsSnapshot(groupId: String) {}
+
     static func makeSeeded(scenario: UITestScenario) -> UITestStore {
         let now = Date()
         let ownerId = "owner"
@@ -370,24 +374,37 @@ final class UITestEventService: EventServicing {
     }
 
     func updateEvent(groupId: String, eventId: String, note: String?, media: [EventMedia]) async throws {
+        guard let currentUser = store.authUser else {
+            throw AppError.missingAuthUser
+        }
         guard var events = store.eventsByGroup[groupId],
               let index = events.firstIndex(where: { $0.id == eventId }) else {
             throw AppError.eventNotFound
+        }
+        guard events[index].createdBy == currentUser.uid else {
+            throw AppError.eventPermissionDenied
         }
 
         events[index].note = note
         events[index].media = media
         events[index].updatedAt = Date()
         store.eventsByGroup[groupId] = events
+        store.emitEventsSnapshot(groupId: groupId)
     }
 
     func deleteEventAndUpdateGroup(groupId: String, eventId: String) async throws {
+        guard let currentUser = store.authUser else {
+            throw AppError.missingAuthUser
+        }
         guard var group = store.groups[groupId], group.status == .active else {
             throw AppError.invalidGroupState
         }
         guard var events = store.eventsByGroup[groupId],
               let index = events.firstIndex(where: { $0.id == eventId }) else {
             throw AppError.eventNotFound
+        }
+        guard events[index].createdBy == currentUser.uid else {
+            throw AppError.eventPermissionDenied
         }
 
         let removedEvent = events.remove(at: index)
@@ -397,6 +414,8 @@ final class UITestEventService: EventServicing {
         group.lastEventAt = events.map(\.occurredAt).max() ?? group.createdAt
         group.updatedAt = Date()
         store.groups[groupId] = group
+        store.emitGroupSnapshot(groupId: groupId)
+        store.emitEventsSnapshot(groupId: groupId)
     }
 
     func appendMedia(groupId: String, eventId: String, media: EventMedia) async throws {

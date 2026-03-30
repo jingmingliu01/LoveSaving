@@ -20,6 +20,10 @@ struct JourneyView: View {
         var id: String { rawValue }
     }
 
+    private func canManage(_ event: LoveEvent) -> Bool {
+        session.authUser?.uid == event.createdBy
+    }
+
     var body: some View {
         Group {
             switch mode {
@@ -49,18 +53,20 @@ struct JourneyView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        HStack {
-                            Button("Edit") {
-                                editingEvent = event
-                            }
-                            .buttonStyle(.bordered)
+                        if canManage(event) {
+                            HStack {
+                                Button("Edit") {
+                                    editingEvent = event
+                                }
+                                .buttonStyle(.bordered)
 
-                            Button("Delete", role: .destructive) {
-                                deletingEvent = event
+                                Button("Delete", role: .destructive) {
+                                    deletingEvent = event
+                                }
+                                .buttonStyle(.bordered)
                             }
-                            .buttonStyle(.bordered)
+                            .padding(.top, 4)
                         }
-                        .padding(.top, 4)
                     }
                     .padding(.vertical, 4)
                 }

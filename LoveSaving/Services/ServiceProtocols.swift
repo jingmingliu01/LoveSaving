@@ -17,6 +17,7 @@ enum AppError: LocalizedError {
     case emptyTapBurst
     case imageTooLargeForUpload
     case eventNotFound
+    case eventPermissionDenied
 
     var errorDescription: String? {
         switch self {
@@ -40,6 +41,8 @@ enum AppError: LocalizedError {
             return "Image is too large. Please choose a smaller image."
         case .eventNotFound:
             return "That journey item could not be found."
+        case .eventPermissionDenied:
+            return "You can only edit or delete your own journey items."
         }
     }
 }

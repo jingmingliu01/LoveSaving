@@ -151,6 +151,36 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertNil(session.globalErrorMessage)
     }
 
+    func testDeleteJourneyEventFailsForPartnerOwnedItem() async throws {
+        let store = UITestStore.makeSeeded(scenario: .linked)
+        let partnerEvent = LoveEvent(
+            id: "event_partner_1",
+            createdBy: "partner",
+            type: .deposit,
+            tapCount: 2,
+            delta: 3,
+            note: "Partner event",
+            occurredAt: Date(),
+            recordedAt: Date(),
+            location: EventLocation(lat: 37.77, lng: -122.42, addressText: "San Francisco"),
+            media: [],
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        store.eventsByGroup["group_1", default: []].append(partnerEvent)
+
+        let session = makeSession(store: store).session
+        await waitUntil("auth observer loads partner-owned event") {
+            session.isSignedIn && session.events.contains(where: { $0.id == partnerEvent.id })
+        }
+
+        let didDelete = await session.deleteJourneyEvent(partnerEvent)
+
+        XCTAssertFalse(didDelete)
+        XCTAssertEqual(session.globalErrorMessage, AppError.eventPermissionDenied.localizedDescription)
+        XCTAssertTrue(session.events.contains(where: { $0.id == partnerEvent.id }))
+    }
+
     func testSignOutClearsCrashlyticsUserID() async {
         let harness = makeSession(scenario: .linked)
         let session = harness.session
@@ -274,6 +304,14 @@ final class AppSessionFlowTests: XCTestCase {
     ) -> (session: AppSession, crashReporter: CrashlyticsReporterSpy) {
         let crashReporter = crashReporter ?? CrashlyticsReporterSpy()
         let store = UITestStore.makeSeeded(scenario: scenario)
+        return makeSession(store: store, crashReporter: crashReporter)
+    }
+
+    private func makeSession(
+        store: UITestStore,
+        scenario: UITestScenario = .linked,
+        crashReporter: CrashlyticsReporterSpy = CrashlyticsReporterSpy()
+    ) -> (session: AppSession, crashReporter: CrashlyticsReporterSpy) {
         let auth = UITestAuthService(store: store)
         let container = AppContainer(
             authService: auth,

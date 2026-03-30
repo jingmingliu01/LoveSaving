@@ -295,8 +295,14 @@ final class AppSession: ObservableObject {
         removeExistingImage: Bool
     ) async -> Bool {
         await runBusyTask(context: .source("event.updateJourneyEvent")) { [self] in
+            guard let currentUser = authUser else {
+                throw AppError.missingAuthUser
+            }
             guard let group else {
                 throw AppError.missingGroup
+            }
+            guard event.createdBy == currentUser.uid else {
+                throw AppError.eventPermissionDenied
             }
 
             let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -343,8 +349,14 @@ final class AppSession: ObservableObject {
     @discardableResult
     func deleteJourneyEvent(_ event: LoveEvent) async -> Bool {
         await runBusyTask(context: .source("event.deleteJourneyEvent")) { [self] in
+            guard let currentUser = authUser else {
+                throw AppError.missingAuthUser
+            }
             guard let group else {
                 throw AppError.missingGroup
+            }
+            guard event.createdBy == currentUser.uid else {
+                throw AppError.eventPermissionDenied
             }
 
             try await container.eventService.deleteEventAndUpdateGroup(groupId: group.id, eventId: event.id)

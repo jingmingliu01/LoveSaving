@@ -81,6 +81,53 @@ final class OnboardingSmokeUITests: XCTestCase {
         )
     }
 
+    func testInviteRootShowsSignOutAndReturnsToAuth() {
+        let app = launchApp(scenario: "signed_out")
+
+        completePart1(in: app)
+        completePart2(in: app)
+
+        assertElementExists("root.auth", in: app, timeout: Timeout.root)
+
+        let signUpSegment = app.segmentedControls.buttons["Sign Up"]
+        XCTAssertTrue(signUpSegment.waitForExistence(timeout: Timeout.root))
+        signUpSegment.tap()
+
+        let email = "invite-signout-\(UUID().uuidString.prefix(8))@example.com"
+        let password = "secret12"
+        let displayName = "Invite Signout"
+
+        let emailField = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Email")).firstMatch
+        XCTAssertTrue(emailField.waitForExistence(timeout: Timeout.root))
+        emailField.tap()
+        emailField.typeText(email)
+
+        let passwordField = app.secureTextFields.matching(NSPredicate(format: "placeholderValue == %@", "Password")).firstMatch
+        XCTAssertTrue(passwordField.waitForExistence(timeout: Timeout.root))
+        passwordField.tap()
+        passwordField.typeText(password)
+
+        let displayNameField = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Display Name")).firstMatch
+        XCTAssertTrue(displayNameField.waitForExistence(timeout: Timeout.root))
+        displayNameField.tap()
+        displayNameField.typeText(displayName)
+
+        let submitButton = app.buttons["auth.submit"]
+        XCTAssertTrue(submitButton.waitForExistence(timeout: Timeout.root))
+        submitButton.tap()
+
+        assertElementExists("root.linking", in: app, timeout: Timeout.root)
+
+        let signOutButton = app.buttons["linking.signOut"]
+        XCTAssertTrue(
+            signOutButton.waitForExistence(timeout: Timeout.root),
+            "Expected sign out button on invite root. UI hierarchy:\n\(app.debugDescription)"
+        )
+        signOutButton.tap()
+
+        assertElementExists("root.auth", in: app, timeout: Timeout.root)
+    }
+
     private func launchApp(scenario: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.terminate()

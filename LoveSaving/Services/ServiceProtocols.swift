@@ -42,6 +42,11 @@ enum AppError: LocalizedError {
 }
 
 @MainActor
+protocol RealtimeSubscription: AnyObject {
+    func cancel()
+}
+
+@MainActor
 protocol AuthServicing {
     var currentUser: AuthUser? { get }
     func authStateStream() -> AsyncStream<AuthUser?>
@@ -81,6 +86,10 @@ protocol GroupServicing {
     func fetchGroup(groupId: String) async throws -> LoveGroup?
     func createGroupAndLinkUsers(invite: Invite, groupName: String) async throws -> LoveGroup
     func softUnlink(group: LoveGroup) async throws
+    func observeGroup(
+        groupId: String,
+        onChange: @escaping @MainActor (Result<LoveGroup?, Error>) -> Void
+    ) -> any RealtimeSubscription
 }
 
 @MainActor
@@ -88,6 +97,11 @@ protocol EventServicing {
     func createEventAndUpdateGroup(groupId: String, createdBy: String, draft: EventDraft, eventId: String?) async throws -> LoveEvent
     func fetchEvents(groupId: String, limit: Int) async throws -> [LoveEvent]
     func appendMedia(groupId: String, eventId: String, media: EventMedia) async throws
+    func observeRecentEvents(
+        groupId: String,
+        limit: Int,
+        onChange: @escaping @MainActor (Result<[LoveEvent], Error>) -> Void
+    ) -> any RealtimeSubscription
 }
 
 @MainActor

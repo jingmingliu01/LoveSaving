@@ -79,3 +79,16 @@ This means:
 
 - local machine: `.env.local` is convenient
 - Cloud Run: Secret Manager remains the source of truth
+
+For a step-by-step local startup guide, use:
+
+- `/Users/jimmy/Desktop/LoveSaving/Docs/working/plans/ai-insights-local-backend-runbook_2026-03-31.md`
+
+For local development, the recommended default modes are:
+
+- `AI_AUTH_MODE=local`
+- `AI_LLM_MODE=stub`
+- `AI_STORAGE_MODE=memory`
+- `AI_TASK_MODE=direct`
+
+That keeps local development fast, cheap, and independent from GCP.

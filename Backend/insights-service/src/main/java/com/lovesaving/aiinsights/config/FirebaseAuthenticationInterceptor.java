@@ -24,6 +24,14 @@ public class FirebaseAuthenticationInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        if (tokenVerifier.isLocalMode()) {
+            request.setAttribute(
+                AUTHENTICATED_USER_REQUEST_ATTRIBUTE,
+                tokenVerifier.resolveLocalUser(request)
+            );
+            return true;
+        }
+
         String authorizationHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (!StringUtils.hasText(authorizationHeader) || !authorizationHeader.startsWith("Bearer ")) {
             writeUnauthorized(response, "missing_bearer_token");

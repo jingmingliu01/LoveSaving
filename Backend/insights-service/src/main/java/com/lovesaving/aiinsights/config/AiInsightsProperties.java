@@ -7,6 +7,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AiInsightsProperties {
 
     private String role = "api";
+    private String authMode = "local";
+    private String llmMode = "stub";
+    private String storageMode = "memory";
+    private String taskMode = "direct";
+    private String localDebugUserId = "local-dev-user";
     private String firebaseProjectId;
     private String openaiApiKey;
     private String primaryModelProvider = "openai";
@@ -25,6 +30,46 @@ public class AiInsightsProperties {
 
     public void setRole(String role) {
         this.role = role;
+    }
+
+    public String getAuthMode() {
+        return authMode;
+    }
+
+    public void setAuthMode(String authMode) {
+        this.authMode = authMode;
+    }
+
+    public String getLlmMode() {
+        return llmMode;
+    }
+
+    public void setLlmMode(String llmMode) {
+        this.llmMode = llmMode;
+    }
+
+    public String getStorageMode() {
+        return storageMode;
+    }
+
+    public void setStorageMode(String storageMode) {
+        this.storageMode = storageMode;
+    }
+
+    public String getTaskMode() {
+        return taskMode;
+    }
+
+    public void setTaskMode(String taskMode) {
+        this.taskMode = taskMode;
+    }
+
+    public String getLocalDebugUserId() {
+        return localDebugUserId;
+    }
+
+    public void setLocalDebugUserId(String localDebugUserId) {
+        this.localDebugUserId = localDebugUserId;
     }
 
     public String getFirebaseProjectId() {
@@ -112,8 +157,11 @@ public class AiInsightsProperties {
     }
 
     public boolean isConfigured() {
-        return firebaseProjectId != null && !firebaseProjectId.isBlank()
-            && openaiApiKey != null && !openaiApiKey.isBlank();
+        if (isStubLlmMode()) {
+            return true;
+        }
+
+        return openaiApiKey != null && !openaiApiKey.isBlank();
     }
 
     public boolean isApiRole() {
@@ -122,6 +170,26 @@ public class AiInsightsProperties {
 
     public boolean isTaskRole() {
         return "task".equalsIgnoreCase(role);
+    }
+
+    public boolean isLocalAuthMode() {
+        return "local".equalsIgnoreCase(authMode);
+    }
+
+    public boolean isFirebaseAuthMode() {
+        return "firebase".equalsIgnoreCase(authMode);
+    }
+
+    public boolean isStubLlmMode() {
+        return "stub".equalsIgnoreCase(llmMode);
+    }
+
+    public boolean isOpenAiLlmMode() {
+        return "openai".equalsIgnoreCase(llmMode);
+    }
+
+    public boolean isDirectTaskMode() {
+        return "direct".equalsIgnoreCase(taskMode);
     }
 
     public static class CloudTasks {

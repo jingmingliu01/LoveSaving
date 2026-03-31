@@ -7,13 +7,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 @Service
-public class InMemoryInsightsStore {
+@ConditionalOnProperty(prefix = "ai", name = "storage-mode", havingValue = "memory", matchIfMissing = true)
+public class InMemoryInsightsStore implements InsightStorage {
 
     private final Map<String, List<InMemoryChatMessage>> messagesByChat = new ConcurrentHashMap<>();
-    private final Map<String, String> memoryByGroup = new ConcurrentHashMap<>();
+    private final Map<String, String> memoryByOwnerGroup = new ConcurrentHashMap<>();
     private final Map<String, String> titleByChat = new ConcurrentHashMap<>();
     private final Map<String, List<String>> eventsByGroup = new ConcurrentHashMap<>();
 
@@ -26,27 +28,30 @@ public class InMemoryInsightsStore {
                 "2026-03-31: Shared a short evening walk and talked about weekend plans."
             ))
         );
-        memoryByGroup.put(
-            "local-dev-group",
+        memoryByOwnerGroup.put(
+            memoryKey("local-dev-user", "local-dev-group"),
             "This couple responds well to gentle, specific suggestions and usually reconnects through small rituals."
         );
     }
 
+    @Override
     public LocalRelationshipContext loadContext(String ownerUid, String groupId, String chatId) {
         return new LocalRelationshipContext(
             ownerUid,
             groupId,
-            memoryByGroup.getOrDefault(groupId, "No long-term summary yet."),
+            memoryByOwnerGroup.getOrDefault(memoryKey(ownerUid, groupId), "No long-term summary yet."),
             List.copyOf(eventsByGroup.getOrDefault(groupId, List.of())),
             recentMessages(chatId, 8)
         );
     }
 
-    public void appendUserMessage(String chatId, String content) {
+    @Override
+    public void appendUserMessage(String ownerUid, String chatId, String groupId, String content) {
         appendMessage(chatId, "user", content);
     }
 
-    public void appendAssistantMessage(String chatId, String content) {
+    @Override
+    public void appendAssistantMessage(String ownerUid, String chatId, String groupId, String content) {
         appendMessage(chatId, "assistant", content);
     }
 
@@ -56,13 +61,15 @@ public class InMemoryInsightsStore {
         return List.copyOf(messages.subList(start, messages.size()));
     }
 
+    @Override
     public String refreshMemory(String groupId, String ownerUid) {
         String updated = "Updated for " + ownerUid + ": keep reinforcing the couple's habit of handling tension early and appreciating small bids for connection.";
-        memoryByGroup.put(groupId, updated);
+        memoryByOwnerGroup.put(memoryKey(ownerUid, groupId), updated);
         return updated;
     }
 
-    public String generateTitle(String chatId) {
+    @Override
+    public String generateTitle(String ownerUid, String chatId, String groupId) {
         List<InMemoryChatMessage> messages = messagesByChat.getOrDefault(chatId, List.of());
         String title = messages.stream()
             .filter(message -> "user".equals(message.role()))
@@ -76,12 +83,17 @@ public class InMemoryInsightsStore {
         return title;
     }
 
-    public String currentTitle(String chatId) {
+    @Override
+    public String currentTitle(String ownerUid, String chatId) {
         return titleByChat.get(chatId);
     }
 
     private void appendMessage(String chatId, String role, String content) {
         messagesByChat.computeIfAbsent(chatId, ignored -> new ArrayList<>())
             .add(new InMemoryChatMessage(role, content, Instant.now()));
+    }
+
+    private String memoryKey(String ownerUid, String groupId) {
+        return ownerUid + "__" + groupId;
     }
 }

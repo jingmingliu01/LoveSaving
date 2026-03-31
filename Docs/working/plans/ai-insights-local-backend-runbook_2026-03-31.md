@@ -305,6 +305,7 @@ Future production path:
 - `api-service` on Cloud Run
 - `task-service` on Cloud Run
 - `Cloud Tasks` for cold-path work
+- `Firestore` storage adapter for persisted chats, memories, and titles
 - `Secret Manager` for keys
 - optional later upgrade:
   - `Neon Postgres`
@@ -341,3 +342,36 @@ CLOUD_TASKS_INVOKER_SERVICE_ACCOUNT_EMAIL=<cloud-tasks-invoker-sa-email>
 ```
 
 This keeps the local mode unchanged while making the cloud task path real.
+
+## Firestore storage adapter notes
+
+The backend now supports two storage modes:
+
+- `AI_STORAGE_MODE=memory`
+- `AI_STORAGE_MODE=firestore`
+
+### Memory mode
+
+- used for local development
+- seeded local relationship context
+- process-local chat history
+- zero GCP runtime dependency
+
+### Firestore mode
+
+- intended for deployed services
+- stores AI chats under top-level `aiChats/{chatId}`
+- stores memory summaries under top-level `aiMemories/{ownerUid__groupId}`
+- reads relationship events from `groups/{groupId}/events` using the existing iOS/Firebase schema
+- formats event context from real event fields such as `type`, `delta`, `tapCount`, `occurredAt`, `location.addressText`, and `note`
+- depends on the composite indexes declared in [Firebase/firestore.indexes.json](/Users/jimmy/Desktop/LoveSaving/Firebase/firestore.indexes.json)
+- expects owner-scoped rules for `aiChats` and `aiMemories` from [Firebase/firestore.rules](/Users/jimmy/Desktop/LoveSaving/Firebase/firestore.rules)
+
+This means cloud deployments no longer depend on the in-memory store.
+
+To deploy the matching Firebase config later:
+
+```bash
+cd /Users/jimmy/Desktop/LoveSaving/Firebase
+firebase deploy --only firestore:rules,firestore:indexes
+```

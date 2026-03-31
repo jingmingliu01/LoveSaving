@@ -157,11 +157,7 @@ public class AiInsightsProperties {
     }
 
     public boolean isConfigured() {
-        if (isStubLlmMode()) {
-            return true;
-        }
-
-        return openaiApiKey != null && !openaiApiKey.isBlank();
+        return hasLlmConfiguration() && hasTaskConfiguration();
     }
 
     public boolean isApiRole() {
@@ -188,12 +184,43 @@ public class AiInsightsProperties {
         return "openai".equalsIgnoreCase(llmMode);
     }
 
+    public boolean isMemoryStorageMode() {
+        return "memory".equalsIgnoreCase(storageMode);
+    }
+
+    public boolean isFirestoreStorageMode() {
+        return "firestore".equalsIgnoreCase(storageMode);
+    }
+
     public boolean isDirectTaskMode() {
         return "direct".equalsIgnoreCase(taskMode);
     }
 
     public boolean isCloudTasksMode() {
         return "cloud_tasks".equalsIgnoreCase(taskMode);
+    }
+
+    private boolean hasLlmConfiguration() {
+        if (isStubLlmMode()) {
+            return true;
+        }
+
+        return openaiApiKey != null && !openaiApiKey.isBlank();
+    }
+
+    private boolean hasTaskConfiguration() {
+        if (isDirectTaskMode()) {
+            return true;
+        }
+
+        if (isCloudTasksMode()) {
+            return firebaseProjectId != null
+                && !firebaseProjectId.isBlank()
+                && cloudTasks.taskServiceUrl != null
+                && !cloudTasks.taskServiceUrl.isBlank();
+        }
+
+        return false;
     }
 
     public static class CloudTasks {

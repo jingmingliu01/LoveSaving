@@ -104,3 +104,16 @@ In that mode:
 - `api-service` enqueues title and memory refresh work into Cloud Tasks
 - `task-service` executes `/internal/tasks/*` handlers
 - local mode still stays `direct`
+
+For cloud-backed persistence, switch to:
+
+- `AI_STORAGE_MODE=firestore`
+
+In that mode:
+
+- `api-service` and `task-service` use Firestore-backed chat, memory, and title storage
+- `groups/{groupId}` and `groups/{groupId}/events/{eventId}` are read using the existing iOS/Firebase schema
+- `aiChats/{chatId}` stays user-private via `ownerUid` and `contextGroupId`
+- `aiMemories/{ownerUid__groupId}` is scoped per user and group
+- requires the `aiChats` composite indexes declared in `/Users/jimmy/Desktop/LoveSaving/Firebase/firestore.indexes.json`
+- local mode still stays `memory`

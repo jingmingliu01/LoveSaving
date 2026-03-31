@@ -403,19 +403,25 @@ Recommended:
 #### `aiChats/{chatId}`
 
 Fields:
+- `chatId`
 - `ownerUid`
 - `contextGroupId`
-- `visibility`
+- `visibility = "private"`
 - `title`
 - `titleStatus`
 - `groupStatusAtCreation`
+- `groupNameAtCreation`
 - `createdAt`
 - `updatedAt`
 - `lastMessageAt`
+- `lastMessagePreview`
+- `lastMessageRole`
 
 #### `aiChats/{chatId}/messages/{messageId}`
 
 Fields:
+- `ownerUid`
+- `contextGroupId`
 - `role`
 - `messageType`
 - `content`
@@ -429,7 +435,10 @@ Fields:
 
 #### `aiMemories/{memoryId}`
 
-You can either use one top-level memory collection or a deterministic memory document per chat or per `(ownerUid, contextGroupId)` pair.
+Use a deterministic memory document per `(ownerUid, contextGroupId)` pair.
+
+Recommended document id:
+- `{ownerUid}__{contextGroupId}`
 
 Fields:
 - `ownerUid`
@@ -440,6 +449,19 @@ Fields:
 - `lastRefreshAt`
 - `sourceEventCount`
 - `sourceMessageCount`
+- `updatedBy`
+- `updatedAt`
+
+### 8.2.1 Firestore index requirements
+
+Phase 1 should explicitly provision these composite indexes:
+
+- `aiChats`: `ownerUid ASC`, `lastMessageAt DESC`
+  - supports listing chats for one user ordered by recent activity
+- `aiChats`: `ownerUid ASC`, `contextGroupId ASC`, `lastMessageAt DESC`
+  - supports finding the most recent chat for one user within one group context
+
+The backend hot path already depends on the second query shape when refreshing user-scoped memory against the most recent chat for a group.
 
 ### 8.3 Why AI chats should be user-private
 

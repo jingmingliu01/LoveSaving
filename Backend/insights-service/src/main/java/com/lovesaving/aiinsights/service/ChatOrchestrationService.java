@@ -13,18 +13,18 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Service
 public class ChatOrchestrationService {
 
-    private final InMemoryInsightsStore insightsStore;
+    private final InsightStorage insightStorage;
     private final LlmGatewayService llmGatewayService;
     private final TaskDispatchService taskDispatchService;
     private final Executor streamingExecutor;
 
     public ChatOrchestrationService(
-        InMemoryInsightsStore insightsStore,
+        InsightStorage insightStorage,
         LlmGatewayService llmGatewayService,
         TaskDispatchService taskDispatchService,
         @Qualifier("aiInsightsStreamingExecutor") Executor streamingExecutor
     ) {
-        this.insightsStore = insightsStore;
+        this.insightStorage = insightStorage;
         this.llmGatewayService = llmGatewayService;
         this.taskDispatchService = taskDispatchService;
         this.streamingExecutor = streamingExecutor;
@@ -50,8 +50,8 @@ public class ChatOrchestrationService {
             ? "local-dev-group"
             : request.contextGroupId();
 
-        insightsStore.appendUserMessage(chatId, request.message());
-        LocalRelationshipContext context = insightsStore.loadContext(authenticatedUser.uid(), groupId, chatId);
+        insightStorage.appendUserMessage(authenticatedUser.uid(), chatId, groupId, request.message());
+        LocalRelationshipContext context = insightStorage.loadContext(authenticatedUser.uid(), groupId, chatId);
 
         try {
             emitter.send(SseEmitter.event()
@@ -66,14 +66,14 @@ public class ChatOrchestrationService {
                 delta -> safeSendDelta(emitter, delta)
             );
 
-            insightsStore.appendAssistantMessage(chatId, assistantReply);
+            insightStorage.appendAssistantMessage(authenticatedUser.uid(), chatId, groupId, assistantReply);
             taskDispatchService.afterAssistantReply(authenticatedUser.uid(), chatId, groupId);
 
             emitter.send(SseEmitter.event()
                 .name("done")
                 .data("""
                     {"status":"ok","title":"%s"}
-                    """.formatted(nullToEmpty(insightsStore.currentTitle(chatId))), MediaType.APPLICATION_JSON));
+                    """.formatted(nullToEmpty(insightStorage.currentTitle(authenticatedUser.uid(), chatId))), MediaType.APPLICATION_JSON));
             emitter.complete();
         } catch (Exception exception) {
             emitter.completeWithError(exception);

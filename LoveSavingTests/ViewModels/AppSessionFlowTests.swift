@@ -608,6 +608,24 @@ private struct InviteFetchFailingService: InviteServicing {
 }
 
 @MainActor
+private final class CountingRealtimeSubscription: RealtimeSubscription {
+    private var onCancel: (() -> Void)?
+
+    init(onCancel: @escaping () -> Void) {
+        self.onCancel = onCancel
+    }
+
+    func cancel() {
+        onCancel?()
+        onCancel = nil
+    }
+
+    deinit {
+        onCancel?()
+    }
+}
+
+@MainActor
 private final class DelayedInviteService: InviteServicing {
     private let store: UITestStore
     private let delayNanoseconds: UInt64
@@ -768,7 +786,7 @@ private final class CountingGroupService: GroupServicing {
     ) -> any RealtimeSubscription {
         let id = store.addGroupObserver(groupId: groupId, onChange: onChange)
         store.emitGroupSnapshot(groupId: groupId)
-        return UITestRealtimeSubscription { [weak store] in
+        return CountingRealtimeSubscription { [weak store] in
             Task { @MainActor in
                 store?.removeGroupObserver(id)
             }
@@ -846,7 +864,7 @@ private final class CountingEventService: EventServicing {
     ) -> any RealtimeSubscription {
         let id = store.addEventObserver(groupId: groupId, limit: limit, onChange: onChange)
         store.emitEventsSnapshot(groupId: groupId)
-        return UITestRealtimeSubscription { [weak store] in
+        return CountingRealtimeSubscription { [weak store] in
             Task { @MainActor in
                 store?.removeEventObserver(id)
             }

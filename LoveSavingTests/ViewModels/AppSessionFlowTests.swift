@@ -269,7 +269,6 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertFalse(session.isSignedIn)
         XCTAssertTrue(session.inboundInvites.isEmpty)
     }
-
     func testRealtimeIdenticalSnapshotsDoNotRepublishEvents() async {
         let harness = makeRealtimeHarness(scenario: .linked)
         let session = harness.session

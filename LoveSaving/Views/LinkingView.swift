@@ -62,6 +62,14 @@ struct LinkingView: View {
             }
         }
         .navigationTitle("Link to Start")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Sign Out", role: .destructive) {
+                    session.signOut()
+                }
+                .accessibilityIdentifier("linking.signOut")
+            }
+        }
         .task {
             await session.refreshInvites()
         }

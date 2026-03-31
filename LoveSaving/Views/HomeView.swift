@@ -25,68 +25,77 @@ struct HomeView: View {
     var body: some View {
         let hasSelectedImage = viewModel.selectedImageData != nil
 
-        VStack(spacing: 20) {
-            if viewModel.isTutorialMode {
-                tutorialTitlePlaceholder
-            }
-
-            Text("Love Balance")
-                .font(.title2.weight(.semibold))
-                .tutorialHidden(viewModel.isTutorialMode)
-
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.clear)
-                .frame(width: 116, height: 116)
-                .overlay {
-                    Text("\(session.group?.loveBalance ?? 0)")
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
-                        .accessibilityIdentifier("home.balance")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        ScrollView {
+            VStack(spacing: 20) {
+                if viewModel.isTutorialMode {
+                    tutorialTitlePlaceholder
                 }
-                .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .tutorialTarget(.balanceValue)
 
-            VStack(spacing: 12) {
-                Text("Tap Count: \(viewModel.tapCount)")
-                    .accessibilityIdentifier("home.tapCount")
-                Text("Predicted Delta: \(viewModel.predictedDelta >= 0 ? "+" : "")\(viewModel.predictedDelta)")
-                    .foregroundStyle(viewModel.predictedDelta >= 0 ? .green : .red)
-                    .accessibilityIdentifier("home.predictedDelta")
-            }
-            .font(.headline)
-            .tutorialHidden(viewModel.isTutorialMode)
+                Text("Love Balance")
+                    .font(.title2.weight(.semibold))
+                    .tutorialHidden(viewModel.isTutorialMode)
 
-            Button {
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
-                    viewModel.registerTap()
-                }
-            } label: {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Color.clear)
                     .frame(width: 116, height: 116)
                     .overlay {
-                        Image(systemName: viewModel.type == .deposit ? "heart.fill" : "heart.slash.fill")
-                            .font(.system(size: 70))
-                            .foregroundStyle(viewModel.type == .deposit ? .pink : .red)
-                            .scaleEffect(viewModel.tapCount > 0 ? 1.06 : 1.0)
+                        Text("\(session.group?.loveBalance ?? 0)")
+                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .accessibilityIdentifier("home.balance")
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     }
-                    .tutorialTarget(.tapButton)
-            }
-            .buttonStyle(.plain)
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .disabled(!isHeartInteractive)
-            .accessibilityIdentifier("home.tapButton")
+                    .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .tutorialTarget(.balanceValue)
 
-            Spacer()
+                VStack(spacing: 12) {
+                    Text("Tap Count: \(viewModel.tapCount)")
+                        .accessibilityIdentifier("home.tapCount")
+                    Text("Predicted Delta: \(viewModel.predictedDelta >= 0 ? "+" : "")\(viewModel.predictedDelta)")
+                        .foregroundStyle(viewModel.predictedDelta >= 0 ? .green : .red)
+                        .accessibilityIdentifier("home.predictedDelta")
+                }
+                .font(.headline)
+                .tutorialHidden(viewModel.isTutorialMode)
+
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
+                        viewModel.registerTap()
+                    }
+                } label: {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.clear)
+                        .frame(width: 116, height: 116)
+                        .overlay {
+                            Image(systemName: viewModel.type == .deposit ? "heart.fill" : "heart.slash.fill")
+                                .font(.system(size: 70))
+                                .foregroundStyle(viewModel.type == .deposit ? .pink : .red)
+                                .scaleEffect(viewModel.tapCount > 0 ? 1.06 : 1.0)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        }
+                        .tutorialTarget(.tapButton)
+                }
+                .buttonStyle(.plain)
+                .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .disabled(!isHeartInteractive)
+                .accessibilityIdentifier("home.tapButton")
+
+                Spacer(minLength: 0)
+            }
+            .frame(
+                maxWidth: .infinity,
+                alignment: .top
+            )
+            .padding()
         }
-        .frame(
-            maxWidth: viewModel.isTutorialMode ? .infinity : nil,
-            maxHeight: viewModel.isTutorialMode ? .infinity : nil,
-            alignment: .top
-        )
-        .padding()
         .navigationTitle(viewModel.isTutorialMode ? "" : "Home")
+        .scrollBounceBehavior(.always)
+        .refreshable {
+            guard !viewModel.isTutorialMode else { return }
+            await session.refreshHome()
+        }
+        .safeAreaInset(edge: .top) {
+            RefreshStatusView(state: session.refreshState(for: .home))
+        }
         .safeAreaInset(edge: .bottom) {
             Picker("Type", selection: $viewModel.type) {
                 Text("+").tag(EventType.deposit)

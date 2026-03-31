@@ -269,6 +269,7 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertFalse(session.isSignedIn)
         XCTAssertTrue(session.inboundInvites.isEmpty)
     }
+
     func testRealtimeIdenticalSnapshotsDoNotRepublishEvents() async {
         let harness = makeRealtimeHarness(scenario: .linked)
         let session = harness.session
@@ -293,6 +294,96 @@ final class AppSessionFlowTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 700_000_000)
         XCTAssertEqual(publishCount, 0)
+    }
+
+    func testUpdateJourneyEventCanAddAndRemoveImage() async {
+        let session = makeSession(scenario: .linked).session
+        await waitUntil("auth observer loads linked group") {
+            session.isSignedIn && session.group != nil && !session.events.isEmpty
+        }
+
+        guard let seedEvent = session.events.first else {
+            XCTFail("Expected seeded journey item")
+            return
+        }
+
+        let didAddImage = await session.updateJourneyEvent(
+            seedEvent,
+            note: "Updated note",
+            imageData: Data("image".utf8),
+            removeExistingImage: false
+        )
+
+        XCTAssertTrue(didAddImage)
+        XCTAssertEqual(session.events.first?.note, "Updated note")
+        XCTAssertEqual(session.events.first?.media.count, 1)
+
+        guard let updatedEvent = session.events.first else {
+            XCTFail("Expected updated journey item")
+            return
+        }
+
+        let didRemoveImage = await session.updateJourneyEvent(
+            updatedEvent,
+            note: "Image removed",
+            imageData: nil,
+            removeExistingImage: true
+        )
+
+        XCTAssertTrue(didRemoveImage)
+        XCTAssertEqual(session.events.first?.note, "Image removed")
+        XCTAssertEqual(session.events.first?.media.count, 0)
+        XCTAssertNil(session.globalErrorMessage)
+    }
+
+    func testDeleteJourneyEventRemovesItemAndUpdatesGroupBalance() async {
+        let session = makeSession(scenario: .linked).session
+        await waitUntil("auth observer loads linked group") {
+            session.isSignedIn && session.group != nil && !session.events.isEmpty
+        }
+
+        let initialBalance = session.group?.loveBalance
+        guard let seedEvent = session.events.first else {
+            XCTFail("Expected seeded journey item")
+            return
+        }
+
+        let didDelete = await session.deleteJourneyEvent(seedEvent)
+
+        XCTAssertTrue(didDelete)
+        XCTAssertTrue(session.events.isEmpty)
+        XCTAssertEqual(session.group?.loveBalance, (initialBalance ?? 0) - seedEvent.delta)
+        XCTAssertNil(session.globalErrorMessage)
+    }
+
+    func testDeleteJourneyEventAllowsPartnerOwnedItem() async throws {
+        let store = UITestStore.makeSeeded(scenario: .linked)
+        let partnerEvent = LoveEvent(
+            id: "event_partner_1",
+            createdBy: "partner",
+            type: .deposit,
+            tapCount: 2,
+            delta: 3,
+            note: "Partner event",
+            occurredAt: Date(),
+            recordedAt: Date(),
+            location: EventLocation(lat: 37.77, lng: -122.42, addressText: "San Francisco"),
+            media: [],
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        store.eventsByGroup["group_1", default: []].append(partnerEvent)
+
+        let session = makeSession(store: store).session
+        await waitUntil("auth observer loads partner-owned event") {
+            session.isSignedIn && session.events.contains(where: { $0.id == partnerEvent.id })
+        }
+
+        let didDelete = await session.deleteJourneyEvent(partnerEvent)
+
+        XCTAssertTrue(didDelete)
+        XCTAssertFalse(session.events.contains(where: { $0.id == partnerEvent.id }))
+        XCTAssertNil(session.globalErrorMessage)
     }
 
     func testSignOutClearsCrashlyticsUserID() async {
@@ -527,6 +618,14 @@ final class AppSessionFlowTests: XCTestCase {
     ) -> (session: AppSession, crashReporter: CrashlyticsReporterSpy) {
         let crashReporter = crashReporter ?? CrashlyticsReporterSpy()
         let store = UITestStore.makeSeeded(scenario: scenario)
+        return makeSession(store: store, crashReporter: crashReporter)
+    }
+
+    private func makeSession(
+        store: UITestStore,
+        scenario: UITestScenario = .linked,
+        crashReporter: CrashlyticsReporterSpy = CrashlyticsReporterSpy()
+    ) -> (session: AppSession, crashReporter: CrashlyticsReporterSpy) {
         let auth = UITestAuthService(store: store)
         let container = AppContainer(
             authService: auth,
@@ -835,6 +934,9 @@ private final class CountingEventService: EventServicing {
             store.groups[groupId] = group
         }
 
+        store.emitGroupSnapshot(groupId: groupId)
+        store.emitEventsSnapshot(groupId: groupId)
+
         return event
     }
 
@@ -846,6 +948,39 @@ private final class CountingEventService: EventServicing {
         return Array(store.eventsByGroup[groupId, default: []].prefix(limit))
     }
 
+    func updateEvent(groupId: String, eventId: String, note: String?, media: [EventMedia]) async throws {
+        guard var events = store.eventsByGroup[groupId],
+              let index = events.firstIndex(where: { $0.id == eventId }) else {
+            throw AppError.eventNotFound
+        }
+
+        events[index].note = note
+        events[index].media = media
+        events[index].updatedAt = Date()
+        store.eventsByGroup[groupId] = events
+        store.emitEventsSnapshot(groupId: groupId)
+    }
+
+    func deleteEventAndUpdateGroup(groupId: String, eventId: String) async throws {
+        guard var group = store.groups[groupId], group.status == .active else {
+            throw AppError.invalidGroupState
+        }
+        guard var events = store.eventsByGroup[groupId],
+              let index = events.firstIndex(where: { $0.id == eventId }) else {
+            throw AppError.eventNotFound
+        }
+
+        let removedEvent = events.remove(at: index)
+        store.eventsByGroup[groupId] = events
+
+        group.loveBalance -= removedEvent.delta
+        group.lastEventAt = events.map(\.occurredAt).max() ?? group.createdAt
+        group.updatedAt = Date()
+        store.groups[groupId] = group
+        store.emitGroupSnapshot(groupId: groupId)
+        store.emitEventsSnapshot(groupId: groupId)
+    }
+
     func appendMedia(groupId: String, eventId: String, media: EventMedia) async throws {
         guard var events = store.eventsByGroup[groupId],
               let index = events.firstIndex(where: { $0.id == eventId }) else {
@@ -855,6 +990,7 @@ private final class CountingEventService: EventServicing {
         events[index].media.append(media)
         events[index].updatedAt = Date()
         store.eventsByGroup[groupId] = events
+        store.emitEventsSnapshot(groupId: groupId)
     }
 
     func observeRecentEvents(

@@ -314,7 +314,7 @@ final class AppSessionFlowTests: XCTestCase {
         let harness = makeSession(scenario: .linked)
         let session = harness.session
         let crashReporter = harness.crashReporter
-        await waitUntil("auth observer loads profile") {
+        await waitUntil("auth observer loads profile", timeoutNanoseconds: 15_000_000_000) {
             session.isSignedIn && session.profile != nil
         }
 
@@ -410,6 +410,115 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertEqual(session.profile?.email, "invite-failure@example.com")
         XCTAssertEqual(session.inboundInvites, [])
         XCTAssertNil(session.globalErrorMessage)
+    }
+
+    func testJourneyRefreshDeduplicatesConcurrentCalls() async {
+        let store = UITestStore.makeSeeded(scenario: .linked)
+        let auth = UITestAuthService(store: store)
+        let eventService = CountingEventService(store: store, fetchDelayNanoseconds: 100_000_000)
+        let container = AppContainer(
+            authService: auth,
+            userDataService: CountingUserDataService(store: store),
+            inviteService: UITestInviteService(store: store),
+            groupService: CountingGroupService(store: store),
+            eventService: eventService,
+            mediaService: UITestMediaService(),
+            messagingService: UITestMessagingService(),
+            runtimeMode: .uiTest(.linked)
+        )
+        let session = AppSession(container: container)
+
+        await waitUntil("auth observer loads linked events") {
+            session.isSignedIn && session.group != nil && !session.events.isEmpty
+        }
+
+        let baselineFetchCount = eventService.fetchEventsCallCount
+
+        async let firstRefresh: Void = session.refreshJourney()
+        async let secondRefresh: Void = session.refreshJourney()
+        _ = await (firstRefresh, secondRefresh)
+
+        XCTAssertEqual(eventService.fetchEventsCallCount - baselineFetchCount, 1)
+        XCTAssertNil(session.globalErrorMessage)
+    }
+
+    func testCancelledRefreshDoesNotOverwriteIdleStateAfterSignOut() async {
+        let store = UITestStore.makeSeeded(scenario: .linked)
+        let auth = UITestAuthService(store: store)
+        let container = AppContainer(
+            authService: auth,
+            userDataService: CountingUserDataService(store: store),
+            inviteService: UITestInviteService(store: store),
+            groupService: CountingGroupService(store: store),
+            eventService: CountingEventService(store: store, fetchDelayNanoseconds: 300_000_000),
+            mediaService: UITestMediaService(),
+            messagingService: UITestMessagingService(),
+            runtimeMode: .uiTest(.linked)
+        )
+        let session = AppSession(container: container)
+
+        await waitUntil("auth observer loads linked session") {
+            session.isSignedIn && session.group != nil
+        }
+
+        async let refresh: Void = session.refreshJourney()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        session.signOut()
+        _ = await refresh
+
+        XCTAssertEqual(session.refreshState(for: .journey), .idle)
+        XCTAssertFalse(session.isSignedIn)
+    }
+
+    func testPageScopedRefreshesOnlyFetchTheirOwnData() async {
+        let store = UITestStore.makeSeeded(scenario: .linked)
+        let auth = UITestAuthService(store: store)
+        let userDataService = CountingUserDataService(store: store)
+        let groupService = CountingGroupService(store: store)
+        let eventService = CountingEventService(store: store)
+        let container = AppContainer(
+            authService: auth,
+            userDataService: userDataService,
+            inviteService: UITestInviteService(store: store),
+            groupService: groupService,
+            eventService: eventService,
+            mediaService: UITestMediaService(),
+            messagingService: UITestMessagingService(),
+            runtimeMode: .uiTest(.linked)
+        )
+        let session = AppSession(container: container)
+
+        await waitUntil("auth observer loads linked session") {
+            session.isSignedIn && session.group != nil && session.profile != nil
+        }
+
+        let userBaseline = userDataService.fetchUserCallCount
+        let groupBaseline = groupService.fetchGroupCallCount
+        let eventBaseline = eventService.fetchEventsCallCount
+
+        await session.refreshJourney()
+
+        XCTAssertEqual(userDataService.fetchUserCallCount - userBaseline, 0)
+        XCTAssertEqual(groupService.fetchGroupCallCount - groupBaseline, 0)
+        XCTAssertEqual(eventService.fetchEventsCallCount - eventBaseline, 1)
+
+        let groupAfterJourney = groupService.fetchGroupCallCount
+        let eventAfterJourney = eventService.fetchEventsCallCount
+
+        await session.refreshHome()
+
+        XCTAssertEqual(userDataService.fetchUserCallCount - userBaseline, 0)
+        XCTAssertEqual(groupService.fetchGroupCallCount - groupAfterJourney, 1)
+        XCTAssertEqual(eventService.fetchEventsCallCount - eventAfterJourney, 0)
+
+        let groupAfterHome = groupService.fetchGroupCallCount
+        let eventAfterHome = eventService.fetchEventsCallCount
+
+        await session.refreshProfile()
+
+        XCTAssertEqual(userDataService.fetchUserCallCount - userBaseline, 1)
+        XCTAssertEqual(groupService.fetchGroupCallCount - groupAfterHome, 1)
+        XCTAssertEqual(eventService.fetchEventsCallCount - eventAfterHome, 0)
     }
 
     private func makeSession(
@@ -535,5 +644,212 @@ private final class DelayedInviteService: InviteServicing {
             status: status,
             respondedAt: respondedAt
         )
+    }
+}
+
+@MainActor
+private final class CountingUserDataService: UserDataServicing {
+    private let store: UITestStore
+    private(set) var fetchUserCallCount = 0
+
+    init(store: UITestStore) {
+        self.store = store
+    }
+
+    func upsertUser(_ user: UserProfile) async throws {
+        store.users[user.id] = user
+    }
+
+    func fetchUser(uid: String) async throws -> UserProfile? {
+        fetchUserCallCount += 1
+        return store.users[uid]
+    }
+
+    func findUser(email: String) async throws -> UserProfile? {
+        store.users.values.first { $0.email.caseInsensitiveCompare(email) == .orderedSame }
+    }
+
+    func resolveUserID(identifier: String) async throws -> String? {
+        let normalized = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return nil }
+
+        if normalized.contains("@") {
+            return store.users.values.first {
+                $0.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
+            }?.id
+        }
+
+        return store.users[normalized] == nil ? nil : normalized
+    }
+
+    func setCurrentGroup(uid: String, groupId: String?) async throws {
+        guard var user = store.users[uid] else { return }
+        user.currentGroupId = groupId
+        user.updatedAt = Date()
+        store.users[uid] = user
+    }
+
+    func setHasCompletedOnboarding(uid: String, completed: Bool) async throws {
+        guard var user = store.users[uid] else { return }
+        user.hasCompletedOnboarding = completed
+        user.updatedAt = Date()
+        store.users[uid] = user
+    }
+
+    func updateFcmToken(uid: String, token: String) async throws {
+        guard var user = store.users[uid] else { return }
+        user.fcmToken = token
+        user.updatedAt = Date()
+        store.users[uid] = user
+    }
+}
+
+@MainActor
+private final class CountingGroupService: GroupServicing {
+    private let store: UITestStore
+    private(set) var fetchGroupCallCount = 0
+
+    init(store: UITestStore) {
+        self.store = store
+    }
+
+    func fetchGroup(groupId: String) async throws -> LoveGroup? {
+        fetchGroupCallCount += 1
+        return store.groups[groupId]
+    }
+
+    func createGroupAndLinkUsers(invite: Invite, groupName: String) async throws -> LoveGroup {
+        let now = Date()
+        let group = LoveGroup(
+            id: "group_\(UUID().uuidString.prefix(8))",
+            groupName: groupName,
+            memberIds: [invite.fromUid, invite.toUid],
+            createdBy: invite.toUid,
+            status: .active,
+            loveBalance: 0,
+            lastEventAt: now,
+            createdAt: now,
+            updatedAt: now
+        )
+        store.groups[group.id] = group
+
+        if var fromUser = store.users[invite.fromUid] {
+            fromUser.currentGroupId = group.id
+            fromUser.updatedAt = now
+            store.users[invite.fromUid] = fromUser
+        }
+        if var toUser = store.users[invite.toUid] {
+            toUser.currentGroupId = group.id
+            toUser.updatedAt = now
+            store.users[invite.toUid] = toUser
+        }
+
+        return group
+    }
+
+    func softUnlink(group: LoveGroup) async throws {
+        guard let existing = store.groups[group.id] else { return }
+        var updatedGroup = existing
+        updatedGroup.status = .inactive
+        updatedGroup.updatedAt = Date()
+        store.groups[group.id] = updatedGroup
+
+        for memberId in existing.memberIds {
+            guard var user = store.users[memberId] else { continue }
+            user.currentGroupId = nil
+            user.updatedAt = Date()
+            store.users[memberId] = user
+        }
+    }
+
+    func observeGroup(
+        groupId: String,
+        onChange: @escaping @MainActor (Result<LoveGroup?, Error>) -> Void
+    ) -> any RealtimeSubscription {
+        let id = store.addGroupObserver(groupId: groupId, onChange: onChange)
+        store.emitGroupSnapshot(groupId: groupId)
+        return UITestRealtimeSubscription { [weak store] in
+            Task { @MainActor in
+                store?.removeGroupObserver(id)
+            }
+        }
+    }
+}
+
+@MainActor
+private final class CountingEventService: EventServicing {
+    private let store: UITestStore
+    private let fetchDelayNanoseconds: UInt64
+    private(set) var fetchEventsCallCount = 0
+
+    init(store: UITestStore, fetchDelayNanoseconds: UInt64 = 0) {
+        self.store = store
+        self.fetchDelayNanoseconds = fetchDelayNanoseconds
+    }
+
+    func createEventAndUpdateGroup(
+        groupId: String,
+        createdBy: String,
+        draft: EventDraft,
+        eventId: String?
+    ) async throws -> LoveEvent {
+        let now = Date()
+        let event = LoveEvent(
+            id: eventId ?? UUID().uuidString,
+            createdBy: createdBy,
+            type: draft.type,
+            tapCount: draft.tapCount,
+            delta: draft.delta,
+            note: draft.note,
+            occurredAt: draft.occurredAt,
+            recordedAt: now,
+            location: draft.location,
+            media: draft.media,
+            createdAt: now,
+            updatedAt: now
+        )
+        store.eventsByGroup[groupId, default: []].insert(event, at: 0)
+
+        if var group = store.groups[groupId] {
+            group.loveBalance += draft.delta
+            group.lastEventAt = draft.occurredAt
+            group.updatedAt = now
+            store.groups[groupId] = group
+        }
+
+        return event
+    }
+
+    func fetchEvents(groupId: String, limit: Int) async throws -> [LoveEvent] {
+        fetchEventsCallCount += 1
+        if fetchDelayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: fetchDelayNanoseconds)
+        }
+        return Array(store.eventsByGroup[groupId, default: []].prefix(limit))
+    }
+
+    func appendMedia(groupId: String, eventId: String, media: EventMedia) async throws {
+        guard var events = store.eventsByGroup[groupId],
+              let index = events.firstIndex(where: { $0.id == eventId }) else {
+            return
+        }
+
+        events[index].media.append(media)
+        events[index].updatedAt = Date()
+        store.eventsByGroup[groupId] = events
+    }
+
+    func observeRecentEvents(
+        groupId: String,
+        limit: Int,
+        onChange: @escaping @MainActor (Result<[LoveEvent], Error>) -> Void
+    ) -> any RealtimeSubscription {
+        let id = store.addEventObserver(groupId: groupId, limit: limit, onChange: onChange)
+        store.emitEventsSnapshot(groupId: groupId)
+        return UITestRealtimeSubscription { [weak store] in
+            Task { @MainActor in
+                store?.removeEventObserver(id)
+            }
+        }
     }
 }

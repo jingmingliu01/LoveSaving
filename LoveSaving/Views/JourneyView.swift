@@ -20,28 +20,39 @@ struct JourneyView: View {
         Group {
             switch mode {
             case .list:
-                List(session.events) { event in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(event.note ?? "No note")
-                            .font(.headline)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(session.events) { event in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(event.note ?? "No note")
+                                    .font(.headline)
 
-                        Text(AppDisplayTime.estDateTime(event.occurredAt))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                                Text(AppDisplayTime.estDateTime(event.occurredAt))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
 
-                        if let address = event.location.addressText {
-                            Text(address)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                if let address = event.location.addressText {
+                                    Text(address)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Text(event.delta >= 0 ? "+\(event.delta)" : "\(event.delta)")
+                                    .foregroundStyle(event.delta >= 0 ? .green : .red)
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            .padding(.vertical, 12)
+
+                            Divider()
                         }
-
-                        Text(event.delta >= 0 ? "+\(event.delta)" : "\(event.delta)")
-                            .foregroundStyle(event.delta >= 0 ? .green : .red)
-                            .font(.subheadline.weight(.semibold))
                     }
-                    .padding(.vertical, 4)
+                    .accessibilityIdentifier("journey.list")
                 }
-                .accessibilityIdentifier("journey.list")
+                .refreshable {
+                    await refreshJourneyAndCamera()
+                }
             case .map:
                 Map(position: $cameraPosition) {
                     ForEach(session.events) { event in
@@ -54,15 +65,22 @@ struct JourneyView: View {
                         )
                     }
                 }
+                .frame(minHeight: 420)
                 .mapControls {
                     MapCompass()
                     MapUserLocationButton()
                     MapScaleView()
                 }
                 .accessibilityIdentifier("journey.map")
+                .refreshable {
+                    await refreshJourneyAndCamera()
+                }
             }
         }
         .navigationTitle("Journey")
+        .safeAreaInset(edge: .top) {
+            RefreshStatusView(state: session.refreshState(for: .journey))
+        }
         .safeAreaInset(edge: .bottom) {
             Picker("View", selection: $mode) {
                 ForEach(Mode.allCases) { mode in
@@ -76,20 +94,28 @@ struct JourneyView: View {
             .accessibilityIdentifier("journey.modePicker")
         }
         .task(id: session.group?.id) {
-            await session.refreshEvents()
-            if let first = session.events.first {
-                cameraPosition = .region(
-                    MKCoordinateRegion(
-                        center: CLLocationCoordinate2D(latitude: first.location.lat, longitude: first.location.lng),
-                        span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
-                    )
-                )
-            }
+            await refreshJourneyAndCamera()
         }
         .onChange(of: mode) { _, newMode in
             if newMode == .map {
                 locationManager.requestAuthorizationIfNeeded()
             }
         }
+    }
+
+    private func refreshJourneyAndCamera() async {
+        await session.refreshJourney()
+        updateCameraPositionFromFirstEvent()
+    }
+
+    private func updateCameraPositionFromFirstEvent() {
+        guard let first = session.events.first else { return }
+
+        cameraPosition = .region(
+            MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: first.location.lat, longitude: first.location.lng),
+                span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
+            )
+        )
     }
 }

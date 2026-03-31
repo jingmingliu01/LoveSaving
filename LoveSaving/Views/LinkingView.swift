@@ -7,6 +7,21 @@ struct LinkingView: View {
 
     var body: some View {
         List {
+            Section("Current Account") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(session.profile?.displayName ?? session.authUser?.displayName ?? "Signed In")
+                        .font(.headline)
+                    Text(session.profile?.email ?? session.authUser?.email ?? "Unknown email")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button("Sign Out", role: .destructive) {
+                    session.signOut()
+                }
+                .accessibilityIdentifier("linking.signOut")
+            }
+
             Section("Send Invitation") {
                 TextField("Recipient UID or Email", text: $recipient)
                     .textInputAutocapitalization(.never)
@@ -62,14 +77,6 @@ struct LinkingView: View {
             }
         }
         .navigationTitle("Link to Start")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Sign Out", role: .destructive) {
-                    session.signOut()
-                }
-                .accessibilityIdentifier("linking.signOut")
-            }
-        }
         .task {
             await session.refreshInvites()
         }

@@ -40,3 +40,4 @@ ai:
     location: ${CLOUD_TASKS_LOCATION:us-central1}
     queue-id: ${CLOUD_TASKS_QUEUE_ID:ai-insights-default}
     task-service-url: ${TASK_SERVICE_URL:}
+    invoker-service-account-email: ${CLOUD_TASKS_INVOKER_SERVICE_ACCOUNT_EMAIL:}

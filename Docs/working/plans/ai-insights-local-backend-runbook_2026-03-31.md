@@ -311,3 +311,33 @@ Future production path:
   - `Cloud Run Worker Pool`
 
 The important point is that the core service boundaries are already the same.
+
+## Cloud Tasks adapter notes
+
+The backend now supports two cold-path task dispatch modes:
+
+- `AI_TASK_MODE=direct`
+- `AI_TASK_MODE=cloud_tasks`
+
+### Direct mode
+
+- used for local development
+- `api-service` executes title and memory refresh immediately in-process
+- no GCP dependency
+
+### Cloud Tasks mode
+
+- intended for deployed `api-service`
+- `api-service` enqueues `/internal/tasks/generate-title`
+- `api-service` enqueues `/internal/tasks/refresh-memory`
+- `task-service` executes those internal endpoints when Cloud Tasks invokes it
+
+Required settings for cloud mode:
+
+```env
+AI_TASK_MODE=cloud_tasks
+TASK_SERVICE_URL=https://<task-service-run-url>
+CLOUD_TASKS_INVOKER_SERVICE_ACCOUNT_EMAIL=<cloud-tasks-invoker-sa-email>
+```
+
+This keeps the local mode unchanged while making the cloud task path real.

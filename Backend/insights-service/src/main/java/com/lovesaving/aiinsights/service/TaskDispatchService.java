@@ -1,31 +1,51 @@
 package com.lovesaving.aiinsights.service;
 
 import com.lovesaving.aiinsights.config.AiInsightsProperties;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 @Service
 public class TaskDispatchService {
 
     private final AiInsightsProperties properties;
-    private final InMemoryInsightsStore insightsStore;
+    private final TaskExecutionService taskExecutionService;
+    private final CloudTasksPublisher cloudTasksPublisher;
 
-    public TaskDispatchService(AiInsightsProperties properties, InMemoryInsightsStore insightsStore) {
+    public TaskDispatchService(
+        AiInsightsProperties properties,
+        TaskExecutionService taskExecutionService,
+        ObjectProvider<CloudTasksPublisher> cloudTasksPublisherProvider
+    ) {
         this.properties = properties;
-        this.insightsStore = insightsStore;
+        this.taskExecutionService = taskExecutionService;
+        this.cloudTasksPublisher = cloudTasksPublisherProvider.getIfAvailable();
     }
 
     public void afterAssistantReply(String ownerUid, String chatId, String groupId) {
         if (properties.isDirectTaskMode()) {
-            insightsStore.generateTitle(chatId);
-            insightsStore.refreshMemory(groupId, ownerUid);
+            taskExecutionService.generateTitle(ownerUid, chatId, groupId);
+            taskExecutionService.refreshMemory(ownerUid, chatId, groupId);
+            return;
+        }
+
+        if (properties.isCloudTasksMode()) {
+            requirePublisher().publishGenerateTitle(ownerUid, chatId, groupId);
+            requirePublisher().publishRefreshMemory(ownerUid, chatId, groupId);
         }
     }
 
     public String refreshMemory(String ownerUid, String chatId, String groupId) {
-        return insightsStore.refreshMemory(groupId, ownerUid);
+        return taskExecutionService.refreshMemory(ownerUid, chatId, groupId);
     }
 
     public String generateTitle(String ownerUid, String chatId, String groupId) {
-        return insightsStore.generateTitle(chatId);
+        return taskExecutionService.generateTitle(ownerUid, chatId, groupId);
+    }
+
+    private CloudTasksPublisher requirePublisher() {
+        if (cloudTasksPublisher == null) {
+            throw new IllegalStateException("Cloud Tasks publisher is not available for AI_TASK_MODE=cloud_tasks");
+        }
+        return cloudTasksPublisher;
     }
 }

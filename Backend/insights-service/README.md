@@ -92,3 +92,15 @@ For local development, the recommended default modes are:
 - `AI_TASK_MODE=direct`
 
 That keeps local development fast, cheap, and independent from GCP.
+
+For cloud cold-path task dispatch, switch to:
+
+- `AI_TASK_MODE=cloud_tasks`
+- `TASK_SERVICE_URL=https://<task-service-url>`
+- `CLOUD_TASKS_INVOKER_SERVICE_ACCOUNT_EMAIL=<cloud-tasks-invoker-sa>`
+
+In that mode:
+
+- `api-service` enqueues title and memory refresh work into Cloud Tasks
+- `task-service` executes `/internal/tasks/*` handlers
+- local mode still stays `direct`

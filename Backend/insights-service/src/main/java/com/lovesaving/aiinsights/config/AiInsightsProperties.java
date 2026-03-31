@@ -192,12 +192,17 @@ public class AiInsightsProperties {
         return "direct".equalsIgnoreCase(taskMode);
     }
 
+    public boolean isCloudTasksMode() {
+        return "cloud_tasks".equalsIgnoreCase(taskMode);
+    }
+
     public static class CloudTasks {
         @NotBlank
         private String location = "us-central1";
         @NotBlank
         private String queueId = "ai-insights-default";
         private String taskServiceUrl;
+        private String invokerServiceAccountEmail;
 
         public String getLocation() {
             return location;
@@ -221,6 +226,14 @@ public class AiInsightsProperties {
 
         public void setTaskServiceUrl(String taskServiceUrl) {
             this.taskServiceUrl = taskServiceUrl;
+        }
+
+        public String getInvokerServiceAccountEmail() {
+            return invokerServiceAccountEmail;
+        }
+
+        public void setInvokerServiceAccountEmail(String invokerServiceAccountEmail) {
+            this.invokerServiceAccountEmail = invokerServiceAccountEmail;
         }
     }
 }

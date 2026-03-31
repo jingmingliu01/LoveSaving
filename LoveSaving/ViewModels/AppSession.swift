@@ -409,6 +409,77 @@ final class AppSession: ObservableObject {
     }
 
     @discardableResult
+    func updateJourneyEvent(
+        _ event: LoveEvent,
+        note: String,
+        imageData: Data?,
+        imageFileExtension: String = "jpg",
+        removeExistingImage: Bool
+    ) async -> Bool {
+        await runBusyTask(context: .source("event.updateJourneyEvent")) { [self] in
+            guard let group else {
+                throw AppError.missingGroup
+            }
+
+            let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedNote = trimmedNote.isEmpty ? nil : trimmedNote
+            let shouldReplaceExistingMedia = !event.media.isEmpty && (removeExistingImage || imageData != nil)
+            let obsoleteMedia = shouldReplaceExistingMedia ? event.media : []
+            var updatedMedia = shouldReplaceExistingMedia ? [] : event.media
+            var uploadedReplacement: EventMedia?
+
+            do {
+                if let imageData {
+                    let uploaded = try await container.mediaService.uploadImageData(
+                        imageData,
+                        groupId: group.id,
+                        eventId: event.id,
+                        fileExtension: imageFileExtension
+                    )
+                    uploadedReplacement = uploaded
+                    updatedMedia = [uploaded]
+                }
+
+                try await container.eventService.updateEvent(
+                    groupId: group.id,
+                    eventId: event.id,
+                    note: resolvedNote,
+                    media: updatedMedia
+                )
+            } catch {
+                if let uploadedReplacement {
+                    try? await container.mediaService.deleteMedia(at: uploadedReplacement.storagePath)
+                }
+                throw error
+            }
+
+            if let refreshedGroup = try await container.groupService.fetchGroup(groupId: group.id) {
+                self.group = refreshedGroup
+            }
+            events = try await container.eventService.fetchEvents(groupId: group.id, limit: 200)
+            await deleteMediaBestEffort(obsoleteMedia, source: "event.updateJourneyEvent.cleanup")
+            syncCrashlyticsContext()
+        }
+    }
+
+    @discardableResult
+    func deleteJourneyEvent(_ event: LoveEvent) async -> Bool {
+        await runBusyTask(context: .source("event.deleteJourneyEvent")) { [self] in
+            guard let group else {
+                throw AppError.missingGroup
+            }
+
+            try await container.eventService.deleteEventAndUpdateGroup(groupId: group.id, eventId: event.id)
+            if let refreshedGroup = try await container.groupService.fetchGroup(groupId: group.id) {
+                self.group = refreshedGroup
+            }
+            events = try await container.eventService.fetchEvents(groupId: group.id, limit: 200)
+            await deleteMediaBestEffort(event.media, source: "event.deleteJourneyEvent.cleanup")
+            syncCrashlyticsContext()
+        }
+    }
+
+    @discardableResult
     func markOnboardingCompleted() async -> Bool {
         guard let uid = authUser?.uid ?? container.authService.currentUser?.uid else {
             return false
@@ -554,6 +625,19 @@ final class AppSession: ObservableObject {
         }
 
         return active
+    }
+
+    private func deleteMediaBestEffort(_ media: [EventMedia], source: String) async {
+        for item in media {
+            do {
+                try await container.mediaService.deleteMedia(at: item.storagePath)
+            } catch {
+                let nsError = error as NSError
+                crashReporter.log(
+                    "source=\(source) route=\(crashRoute) cleanup=media_delete path=\(item.storagePath) domain=\(nsError.domain) code=\(nsError.code)"
+                )
+            }
+        }
     }
 
     private func ensureProfileExists(for user: AuthUser) async throws -> UserProfile {

@@ -250,8 +250,7 @@ service cloud.firestore {
         && d.createdAt == resource.data.createdAt
         && d.loveBalance is int
         && d.lastEventAt is timestamp
-        && d.updatedAt == request.time
-        && d.lastEventAt >= resource.data.lastEventAt;
+        && d.updatedAt == request.time;
     }
 
     // Soft unlink transition: active -> inactive.
@@ -401,10 +400,9 @@ service cloud.firestore {
         allow read: if isGroupParticipant(groupId);
 
         allow update: if isActiveGroupMember(groupId)
-          && resource.data.createdBy == request.auth.uid
           && validEventUpdate();
 
-        allow delete: if false;
+        allow delete: if isActiveGroupMember(groupId);
       }
 
       match /chats/{chatId} {

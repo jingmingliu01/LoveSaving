@@ -341,6 +341,102 @@ service cloud.firestore {
         && d.createdAt == request.time;
     }
 
+    function validAiChatCreate(chatId) {
+      let d = request.resource.data;
+      return d.keys().hasAll([
+          "ownerUid", "contextGroupId", "visibility", "createdAt", "updatedAt", "lastMessageAt"
+        ])
+        && d.keys().hasOnly([
+          "chatId", "ownerUid", "contextGroupId", "visibility", "title", "titleStatus",
+          "groupStatusAtCreation", "groupNameAtCreation",
+          "createdAt", "updatedAt", "lastMessageAt", "lastMessagePreview", "lastMessageRole"
+        ])
+        && d.ownerUid == request.auth.uid
+        && (!d.keys().hasAny(["chatId"]) || d.chatId == chatId)
+        && d.contextGroupId is string
+        && isGroupParticipant(d.contextGroupId)
+        && d.visibility == "private"
+        && isNullableString(d.title)
+        && (!d.keys().hasAny(["titleStatus"]) || d.titleStatus in ["pending", "ready"])
+        && isNullableString(d.groupStatusAtCreation)
+        && isNullableString(d.groupNameAtCreation)
+        && isNullableString(d.lastMessagePreview)
+        && (!d.keys().hasAny(["lastMessageRole"]) || d.lastMessageRole in ["user", "assistant", "system"])
+        && d.createdAt == request.time
+        && d.updatedAt == request.time
+        && d.lastMessageAt == request.time;
+    }
+
+    function validAiChatUpdate() {
+      let d = request.resource.data;
+      return d.diff(resource.data).affectedKeys().hasOnly([
+          "title", "titleStatus", "groupStatusAtCreation", "groupNameAtCreation",
+          "updatedAt", "lastMessageAt", "lastMessagePreview", "lastMessageRole"
+        ])
+        && d.ownerUid == resource.data.ownerUid
+        && d.ownerUid == request.auth.uid
+        && d.contextGroupId == resource.data.contextGroupId
+        && isGroupParticipant(d.contextGroupId)
+        && d.visibility == resource.data.visibility
+        && d.visibility == "private"
+        && d.createdAt == resource.data.createdAt
+        && isNullableString(d.title)
+        && (!d.keys().hasAny(["titleStatus"]) || d.titleStatus in ["pending", "ready"])
+        && isNullableString(d.groupStatusAtCreation)
+        && isNullableString(d.groupNameAtCreation)
+        && isNullableString(d.lastMessagePreview)
+        && (!d.keys().hasAny(["lastMessageRole"]) || d.lastMessageRole in ["user", "assistant", "system"])
+        && d.updatedAt == request.time
+        && d.lastMessageAt == request.time;
+    }
+
+    function validAiMessageCreate(chatId) {
+      let d = request.resource.data;
+      return d.keys().hasAll(["ownerUid", "contextGroupId", "role", "messageType", "content", "createdAt"])
+        && d.keys().hasOnly([
+          "ownerUid", "contextGroupId", "role", "messageType", "content",
+          "attachments", "provider", "model", "inputTokens", "outputTokens", "requestId", "createdAt"
+        ])
+        && d.ownerUid == request.auth.uid
+        && d.contextGroupId is string
+        && d.contextGroupId == get(/databases/$(database)/documents/aiChats/$(chatId)).data.contextGroupId
+        && isGroupParticipant(d.contextGroupId)
+        && d.role in ["user", "assistant", "system"]
+        && d.messageType is string
+        && d.content is string
+        && (!d.keys().hasAny(["attachments"]) || d.attachments is list)
+        && isNullableString(d.provider)
+        && isNullableString(d.model)
+        && (!d.keys().hasAny(["inputTokens"]) || d.inputTokens is int)
+        && (!d.keys().hasAny(["outputTokens"]) || d.outputTokens is int)
+        && isNullableString(d.requestId)
+        && d.createdAt == request.time;
+    }
+
+    function validAiMemoryWrite(memoryId) {
+      let d = request.resource.data;
+      return d.keys().hasAll([
+          "ownerUid", "contextGroupId", "summary", "sourceWindowStart", "sourceWindowEnd",
+          "lastRefreshAt", "sourceEventCount", "sourceMessageCount", "updatedBy", "updatedAt"
+        ])
+        && d.keys().hasOnly([
+          "ownerUid", "contextGroupId", "summary", "sourceWindowStart", "sourceWindowEnd",
+          "lastRefreshAt", "sourceEventCount", "sourceMessageCount", "updatedBy", "updatedAt"
+        ])
+        && d.ownerUid == request.auth.uid
+        && memoryId == request.auth.uid + "__" + d.contextGroupId
+        && d.contextGroupId is string
+        && isGroupParticipant(d.contextGroupId)
+        && d.summary is string
+        && d.sourceWindowStart is timestamp
+        && d.sourceWindowEnd is timestamp
+        && d.lastRefreshAt == request.time
+        && d.sourceEventCount is int
+        && d.sourceMessageCount is int
+        && d.updatedBy == request.auth.uid
+        && d.updatedAt == request.time;
+    }
+
     /**********************
      * Rules by Path
      **********************/
@@ -420,6 +516,28 @@ service cloud.firestore {
           allow update, delete: if false;
         }
       }
+    }
+
+    match /aiChats/{chatId} {
+      allow create: if isSignedIn() && validAiChatCreate(chatId);
+      allow read: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.ownerUid == request.auth.uid && validAiChatUpdate();
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow create: if isSignedIn()
+          && get(/databases/$(database)/documents/aiChats/$(chatId)).data.ownerUid == request.auth.uid
+          && validAiMessageCreate(chatId);
+        allow read: if isSignedIn()
+          && get(/databases/$(database)/documents/aiChats/$(chatId)).data.ownerUid == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    match /aiMemories/{memoryId} {
+      allow create, update: if isSignedIn() && validAiMemoryWrite(memoryId);
+      allow read: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+      allow delete: if false;
     }
   }
 }

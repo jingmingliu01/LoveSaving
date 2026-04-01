@@ -257,11 +257,11 @@ They are **not** the recommended app-level local workflow anymore.
 Use these as the active references:
 
 - backend runtime notes:
-  - [`/Users/jimmy/Desktop/LoveSaving/Backend/insights-service/README.md`](/Users/jimmy/Desktop/LoveSaving/Backend/insights-service/README.md)
+  - [`Backend/insights-service/README.md`](/Backend/insights-service/README.md)
 - local backend runbook:
-  - [`/Users/jimmy/Desktop/LoveSaving/Docs/working/plans/ai-insights-local-backend-runbook_2026-03-31.md`](/Users/jimmy/Desktop/LoveSaving/Docs/working/plans/ai-insights-local-backend-runbook_2026-03-31.md)
+  - [`Docs/working/plans/ai-insights-local-backend-runbook_2026-03-31.md`](/Docs/working/plans/ai-insights-local-backend-runbook_2026-03-31.md)
 - frontend UI/UX implementation plan:
-  - [`/Users/jimmy/Desktop/LoveSaving/Docs/working/plans/ai-insights-frontend-uiux-implementation-plan_2026-04-01.md`](/Users/jimmy/Desktop/LoveSaving/Docs/working/plans/ai-insights-frontend-uiux-implementation-plan_2026-04-01.md)
+  - [`Docs/working/plans/ai-insights-frontend-uiux-implementation-plan_2026-04-01.md`](/Docs/working/plans/ai-insights-frontend-uiux-implementation-plan_2026-04-01.md)
 
 ## 9. Minimal troubleshooting checklist
 

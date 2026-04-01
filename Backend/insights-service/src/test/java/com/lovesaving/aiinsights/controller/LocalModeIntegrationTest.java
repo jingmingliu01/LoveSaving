@@ -1,7 +1,10 @@
 package com.lovesaving.aiinsights.controller;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -78,5 +81,41 @@ class LocalModeIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.taskType").value("refresh-memory"))
             .andExpect(jsonPath("$.status").value("completed"));
+    }
+
+    @Test
+    void threadListHistoryRenameAndSoftDeleteEndpointsWorkInLocalMode() throws Exception {
+        mockMvc.perform(get("/api/v1/ai/chats"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(greaterThanOrEqualTo(3)))
+            .andExpect(jsonPath("$[0].chatId").exists())
+            .andExpect(jsonPath("$[0].title").isNotEmpty());
+
+        mockMvc.perform(get("/api/v1/ai/chats/integration_recent_repair/messages"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(greaterThanOrEqualTo(2)))
+            .andExpect(jsonPath("$[0].role").value("user"))
+            .andExpect(jsonPath("$[1].role").value("assistant"));
+
+        mockMvc.perform(
+                patch("/api/v1/ai/chats/integration_recent_repair")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""
+                        {
+                          "title": "Weekend reset plan"
+                        }
+                        """)
+            )
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.chatId").value("integration_recent_repair"))
+            .andExpect(jsonPath("$.title").value("Weekend reset plan"));
+
+        mockMvc.perform(delete("/api/v1/ai/chats/integration_recent_conflict"))
+            .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/api/v1/ai/chats"))
+            .andExpect(status().isOk())
+            .andExpect(content().string(org.hamcrest.Matchers.not(containsString("integration_recent_conflict"))))
+            .andExpect(content().string(containsString("Weekend reset plan")));
     }
 }

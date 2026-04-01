@@ -236,6 +236,7 @@ final class AppSessionFlowTests: XCTestCase {
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
             aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
+            aiInsightsService: UITestAIInsightsService(),
             crashReporter: CrashlyticsReporterSpy(),
             runtimeMode: .uiTest(.linked)
         )
@@ -430,6 +431,7 @@ final class AppSessionFlowTests: XCTestCase {
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
             aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
+            aiInsightsService: UITestAIInsightsService(),
             crashReporter: crashReporter,
             runtimeMode: .uiTest(.signedOut)
         )
@@ -489,6 +491,7 @@ final class AppSessionFlowTests: XCTestCase {
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
             aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
+            aiInsightsService: UITestAIInsightsService(),
             crashReporter: CrashlyticsReporterSpy(),
             runtimeMode: .uiTest(.signedOut)
         )
@@ -519,6 +522,8 @@ final class AppSessionFlowTests: XCTestCase {
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
             aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
+            aiInsightsService: UITestAIInsightsService(),
+            crashReporter: CrashlyticsReporterSpy(),
             runtimeMode: .uiTest(.linked)
         )
         let session = AppSession(container: container)
@@ -549,6 +554,8 @@ final class AppSessionFlowTests: XCTestCase {
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
             aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
+            aiInsightsService: UITestAIInsightsService(),
+            crashReporter: CrashlyticsReporterSpy(),
             runtimeMode: .uiTest(.linked)
         )
         let session = AppSession(container: container)
@@ -581,6 +588,8 @@ final class AppSessionFlowTests: XCTestCase {
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
             aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
+            aiInsightsService: UITestAIInsightsService(),
+            crashReporter: CrashlyticsReporterSpy(),
             runtimeMode: .uiTest(.linked)
         )
         let session = AppSession(container: container)
@@ -630,8 +639,9 @@ final class AppSessionFlowTests: XCTestCase {
     private func makeSession(
         store: UITestStore,
         scenario: UITestScenario = .linked,
-        crashReporter: CrashlyticsReporterSpy = CrashlyticsReporterSpy()
+        crashReporter: CrashlyticsReporterSpy? = nil
     ) -> (session: AppSession, crashReporter: CrashlyticsReporterSpy) {
+        let crashReporter = crashReporter ?? CrashlyticsReporterSpy()
         let auth = UITestAuthService(store: store)
         let container = AppContainer(
             authService: auth,
@@ -642,6 +652,7 @@ final class AppSessionFlowTests: XCTestCase {
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
             aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
+            aiInsightsService: UITestAIInsightsService(),
             crashReporter: crashReporter,
             runtimeMode: .uiTest(scenario)
         )
@@ -663,6 +674,7 @@ final class AppSessionFlowTests: XCTestCase {
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
             aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
+            aiInsightsService: UITestAIInsightsService(),
             crashReporter: CrashlyticsReporterSpy(),
             runtimeMode: .uiTest(scenario)
         )

@@ -55,9 +55,14 @@ public class ChatOrchestrationService {
         try {
             emitter.send(SseEmitter.event()
                 .name("metadata")
-                .data("""
-                    {"chatId":"%s","uid":"%s","groupId":"%s"}
-                    """.formatted(chatId, authenticatedUser.uid(), groupId), MediaType.APPLICATION_JSON));
+                .data(
+                    "{\"chatId\":\"%s\",\"uid\":\"%s\",\"groupId\":\"%s\"}".formatted(
+                        chatId,
+                        authenticatedUser.uid(),
+                        groupId
+                    ),
+                    MediaType.APPLICATION_JSON
+                ));
 
             String assistantReply = llmGatewayService.streamReply(
                 context,
@@ -70,9 +75,12 @@ public class ChatOrchestrationService {
 
             emitter.send(SseEmitter.event()
                 .name("done")
-                .data("""
-                    {"status":"ok","title":"%s"}
-                    """.formatted(nullToEmpty(insightStorage.currentTitle(authenticatedUser.uid(), chatId))), MediaType.APPLICATION_JSON));
+                .data(
+                    "{\"status\":\"ok\",\"title\":\"%s\"}".formatted(
+                        escapeJson(nullToEmpty(insightStorage.currentTitle(authenticatedUser.uid(), chatId)))
+                    ),
+                    MediaType.APPLICATION_JSON
+                ));
             emitter.complete();
         } catch (Exception exception) {
             emitter.completeWithError(exception);
@@ -89,5 +97,11 @@ public class ChatOrchestrationService {
 
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private String escapeJson(String value) {
+        return value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"");
     }
 }

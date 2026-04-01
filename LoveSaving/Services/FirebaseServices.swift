@@ -12,6 +12,24 @@ import UserNotifications
 #endif
 
 @MainActor
+private final class FirestoreRealtimeSubscription: RealtimeSubscription {
+    private var listener: ListenerRegistration?
+
+    init(listener: ListenerRegistration) {
+        self.listener = listener
+    }
+
+    func cancel() {
+        listener?.remove()
+        listener = nil
+    }
+
+    deinit {
+        listener?.remove()
+    }
+}
+
+@MainActor
 final class FirebaseAuthService: AuthServicing {
     private let auth: Auth
 
@@ -416,6 +434,37 @@ final class FirebaseGroupService: GroupServicing {
 
         try await batch.commit()
     }
+
+    func observeGroup(
+        groupId: String,
+        onChange: @escaping @MainActor (Result<LoveGroup?, Error>) -> Void
+    ) -> any RealtimeSubscription {
+        let listener = db.collection("groups").document(groupId).addSnapshotListener { snapshot, error in
+            Task { @MainActor in
+                if let error {
+                    onChange(.failure(error))
+                    return
+                }
+
+                guard let snapshot else {
+                    onChange(.success(nil))
+                    return
+                }
+                guard snapshot.exists else {
+                    onChange(.success(nil))
+                    return
+                }
+                guard let group = snapshot.toLoveGroup() else {
+                    onChange(.failure(AppError.invalidGroupState))
+                    return
+                }
+
+                onChange(.success(group))
+            }
+        }
+
+        return FirestoreRealtimeSubscription(listener: listener)
+    }
 }
 
 @MainActor
@@ -585,6 +634,31 @@ final class FirebaseEventService: EventServicing {
             ]),
             "updatedAt": FieldValue.serverTimestamp()
         ])
+    }
+
+    func observeRecentEvents(
+        groupId: String,
+        limit: Int,
+        onChange: @escaping @MainActor (Result<[LoveEvent], Error>) -> Void
+    ) -> any RealtimeSubscription {
+        let listener = db.collection("groups")
+            .document(groupId)
+            .collection("events")
+            .order(by: "occurredAt", descending: true)
+            .limit(to: limit)
+            .addSnapshotListener { snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        onChange(.failure(error))
+                        return
+                    }
+
+                    let events = snapshot?.documents.compactMap { $0.toLoveEvent() } ?? []
+                    onChange(.success(events))
+                }
+            }
+
+        return FirestoreRealtimeSubscription(listener: listener)
     }
 }
 
@@ -829,7 +903,8 @@ private extension DocumentSnapshot {
     }
 
     func toLoveGroup() -> LoveGroup? {
-        guard let data = data(),
+        let resolvedData = data(with: .estimate) ?? data()
+        guard let data = resolvedData,
               let groupName = data["groupName"] as? String,
               let memberIds = data["memberIds"] as? [String],
               let createdBy = data["createdBy"] as? String,
@@ -856,7 +931,8 @@ private extension DocumentSnapshot {
     }
 
     func toLoveEvent() -> LoveEvent? {
-        guard let data = data(),
+        let resolvedData = data(with: .estimate) ?? data()
+        guard let data = resolvedData,
               let createdBy = data["createdBy"] as? String,
               let typeRaw = data["type"] as? String,
               let type = EventType(rawValue: typeRaw),

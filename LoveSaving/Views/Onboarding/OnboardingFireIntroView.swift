@@ -184,6 +184,11 @@ struct OnboardingFireIntroView: View {
 
     @MainActor
     private func playCurrentPhase() async {
+        if isUITestMode {
+            showInteractiveStateImmediately()
+            return
+        }
+
         isAdvanceVisible = false
         showAnimation = false
         fullyRevealedLineCount = 0
@@ -241,6 +246,12 @@ struct OnboardingFireIntroView: View {
 
     @MainActor
     private func transitionToLovePhase() async {
+        if isUITestMode {
+            phase = .loveNow
+            phaseRunToken += 1
+            return
+        }
+
         isAdvanceVisible = false
         withAnimation(.easeOut(duration: isUITestMode ? 0.05 : 0.14)) {
             copyOpacity = 0
@@ -264,6 +275,12 @@ struct OnboardingFireIntroView: View {
 
     @MainActor
     private func resetToFirePhase() async {
+        if isUITestMode {
+            phase = .firePast
+            phaseRunToken += 1
+            return
+        }
+
         isAdvanceVisible = false
         withAnimation(.easeOut(duration: isUITestMode ? 0.05 : 0.14)) {
             copyOpacity = 0
@@ -283,5 +300,19 @@ struct OnboardingFireIntroView: View {
 
         phase = .firePast
         phaseRunToken += 1
+    }
+
+    @MainActor
+    private func showInteractiveStateImmediately() {
+        var noAnimation = Transaction()
+        noAnimation.animation = nil
+        withTransaction(noAnimation) {
+            fullyRevealedLineCount = phase.lines.count
+            typingLineIndex = nil
+            revealedCharacterCount = 0
+            showAnimation = true
+            isAdvanceVisible = true
+            copyOpacity = 1
+        }
     }
 }

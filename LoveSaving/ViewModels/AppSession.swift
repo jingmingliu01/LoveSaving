@@ -4,22 +4,58 @@ import Combine
 
 @MainActor
 final class AppSession: ObservableObject {
+    enum RefreshScope: Hashable {
+        case home
+        case journey
+        case profile
+    }
+
+    enum RefreshState: Equatable {
+        case idle
+        case loading
+        case success(Date)
+        case error(String)
+
+        var errorMessage: String? {
+            guard case .error(let message) = self else { return nil }
+            return message
+        }
+    }
+
     @Published private(set) var authUser: AuthUser?
     @Published private(set) var profile: UserProfile?
     @Published private(set) var group: LoveGroup?
     @Published private(set) var inboundInvites: [Invite] = []
     @Published private(set) var events: [LoveEvent] = []
+    @Published private(set) var aiInsightsAvailability: AIInsightsAvailability = .checking
     @Published private(set) var hasResolvedInitialAuthState = false
 
     @Published var globalErrorMessage: String?
     @Published var isBusy = false
+    @Published private(set) var homeRefreshState: RefreshState = .idle
+    @Published private(set) var journeyRefreshState: RefreshState = .idle
+    @Published private(set) var profileRefreshState: RefreshState = .idle
 
     private let container: AppContainer
     private let crashReporter: any CrashlyticsReporting
+    private let refreshDebounceInterval: TimeInterval = 0.6
     private var authTask: Task<Void, Never>?
     private var messagingTask: Task<Void, Never>?
+    private var groupRealtimeSubscription: (any RealtimeSubscription)?
+    private var eventsRealtimeSubscription: (any RealtimeSubscription)?
+    private var realtimeGroupID: String?
+    private var pendingRealtimeGroup: LoveGroup?
+    private var pendingRealtimeEvents: [LoveEvent]?
+    private var groupRealtimeDebounceTask: Task<Void, Never>?
+    private var eventsRealtimeDebounceTask: Task<Void, Never>?
+    private var inviteRealtimeRefreshTask: Task<Void, Never>?
+    private var inFlightRefreshTasks: [RefreshScope: Task<Void, Never>] = [:]
+    private var lastRefreshAt: [RefreshScope: Date] = [:]
+    private var aiInsightsAvailabilityTask: Task<Void, Never>?
     private var crashRoute = "unknown"
     private var currentOperationContext = OperationContext.source("none")
+    private let realtimeEventLimit = 200
+    private let realtimeDebounceNanoseconds: UInt64 = 350_000_000
 
     init(container: AppContainer) {
         self.container = container
@@ -27,11 +63,15 @@ final class AppSession: ObservableObject {
         syncCrashlyticsContext()
         observeAuthState()
         observeMessagingToken()
+        refreshAIInsightsAvailabilityIfNeeded()
     }
 
     deinit {
         authTask?.cancel()
         messagingTask?.cancel()
+        inviteRealtimeRefreshTask?.cancel()
+        inFlightRefreshTasks.values.forEach { $0.cancel() }
+        aiInsightsAvailabilityTask?.cancel()
     }
 
     var isSignedIn: Bool {
@@ -74,16 +114,22 @@ final class AppSession: ObservableObject {
     func signOut() {
         do {
             try container.authService.signOut()
-            authUser = nil
-            profile = nil
-            group = nil
-            inboundInvites = []
-            events = []
-            globalErrorMessage = nil
-            syncCrashlyticsContext()
+            resetSession()
         } catch {
             handleError(error, source: "auth.signOut", presentToUser: true)
         }
+    }
+
+    func resetSession() {
+        stopRealtimeObservers()
+        resetRefreshStates()
+        authUser = nil
+        profile = nil
+        group = nil
+        inboundInvites = []
+        events = []
+        globalErrorMessage = nil
+        syncCrashlyticsContext()
     }
 
     func changePassword(_ newPassword: String) async {
@@ -276,13 +322,93 @@ final class AppSession: ObservableObject {
         }
     }
 
-    func refreshEvents() async {
-        guard let group else { return }
-        do {
-            events = try await container.eventService.fetchEvents(groupId: group.id, limit: 200)
+    func refreshHome() async {
+        await refresh(scope: .home, source: "home.refresh") { [self] in
+            guard let groupId = group?.id ?? profile?.currentGroupId else {
+                stopRealtimeObservers()
+                group = nil
+                events = []
+                if let uid = authUser?.uid {
+                    await refreshInboundInvites(
+                        for: uid,
+                        source: "home.refresh.inboundInvites",
+                        presentToUser: false
+                    )
+                }
+                syncCrashlyticsContext()
+                return
+            }
+
+            if let refreshedGroup = try await container.groupService.fetchGroup(groupId: groupId),
+               refreshedGroup.status == .active {
+                group = refreshedGroup
+                startRealtimeObserversIfNeeded(for: groupId)
+            } else {
+                stopRealtimeObservers()
+                group = nil
+                events = []
+                if let uid = authUser?.uid {
+                    await refreshInboundInvites(
+                        for: uid,
+                        source: "home.refresh.inboundInvites",
+                        presentToUser: false
+                    )
+                }
+            }
             syncCrashlyticsContext()
-        } catch {
-            handleError(error, source: "event.refresh", presentToUser: true)
+        }
+    }
+
+    func refreshJourney() async {
+        await refresh(scope: .journey, source: "journey.refresh") { [self] in
+            guard let groupId = group?.id ?? profile?.currentGroupId else {
+                stopRealtimeObservers()
+                group = nil
+                events = []
+                syncCrashlyticsContext()
+                return
+            }
+
+            events = try await container.eventService.fetchEvents(groupId: groupId, limit: 200)
+            syncCrashlyticsContext()
+        }
+    }
+
+    func refreshProfile() async {
+        await refresh(scope: .profile, source: "profile.refresh") { [self] in
+            guard let currentUser = authUser ?? container.authService.currentUser else { return }
+
+            try await container.authService.ensureSessionReady()
+            let refreshedProfile = try await ensureProfileExists(for: currentUser)
+            profile = refreshedProfile
+
+            if let currentGroupId = refreshedProfile.currentGroupId,
+               let refreshedGroup = try await container.groupService.fetchGroup(groupId: currentGroupId),
+               refreshedGroup.status == .active {
+                group = refreshedGroup
+                startRealtimeObserversIfNeeded(for: currentGroupId)
+            } else {
+                stopRealtimeObservers()
+                group = nil
+                events = []
+                await refreshInboundInvites(
+                    for: currentUser.uid,
+                    source: "profile.refresh.inboundInvites",
+                    presentToUser: false
+                )
+            }
+            syncCrashlyticsContext()
+        }
+    }
+
+    func refreshState(for scope: RefreshScope) -> RefreshState {
+        switch scope {
+        case .home:
+            return homeRefreshState
+        case .journey:
+            return journeyRefreshState
+        case .profile:
+            return profileRefreshState
         }
     }
 
@@ -406,6 +532,20 @@ final class AppSession: ObservableObject {
         }
     }
 
+    func refreshAIInsightsAvailability() async {
+        aiInsightsAvailability = .checking
+        aiInsightsAvailability = await container.aiInsightsAvailabilityService.fetchAvailability()
+        syncCrashlyticsContext()
+    }
+
+    func refreshAIInsightsAvailabilityIfNeeded() {
+        aiInsightsAvailabilityTask?.cancel()
+        aiInsightsAvailabilityTask = Task { [weak self] in
+            guard let self else { return }
+            await refreshAIInsightsAvailability()
+        }
+    }
+
     private func observeAuthState() {
         authTask = Task { [weak self] in
             guard let self else { return }
@@ -415,16 +555,14 @@ final class AppSession: ObservableObject {
                     if let authState {
                         try await refreshForAuthUser(authState)
                     } else {
-                        authUser = nil
-                        profile = nil
-                        group = nil
-                        inboundInvites = []
-                        events = []
+                        resetSession()
                     }
+                    refreshAIInsightsAvailabilityIfNeeded()
                     hasResolvedInitialAuthState = true
                     syncCrashlyticsContext()
                 } catch {
                     handleError(error, source: "auth.observe", presentToUser: true)
+                    refreshAIInsightsAvailabilityIfNeeded()
                     hasResolvedInitialAuthState = true
                     syncCrashlyticsContext()
                 }
@@ -459,8 +597,10 @@ final class AppSession: ObservableObject {
            group.status == .active {
             self.group = group
             inboundInvites = []
-            events = try await container.eventService.fetchEvents(groupId: currentGroupId, limit: 200)
+            events = try await container.eventService.fetchEvents(groupId: currentGroupId, limit: realtimeEventLimit)
+            startRealtimeObserversIfNeeded(for: currentGroupId)
         } else {
+            stopRealtimeObservers()
             self.group = nil
             events = []
             await refreshInboundInvites(
@@ -561,6 +701,69 @@ final class AppSession: ObservableObject {
         throw AppError.missingAuthUser
     }
 
+    private func refresh(
+        scope: RefreshScope,
+        source: String,
+        operation: @escaping @MainActor () async throws -> Void
+    ) async {
+        if let existingTask = inFlightRefreshTasks[scope] {
+            await existingTask.value
+            return
+        }
+
+        let now = Date()
+        if let lastRefreshAt = lastRefreshAt[scope],
+           now.timeIntervalSince(lastRefreshAt) < refreshDebounceInterval {
+            return
+        }
+
+        lastRefreshAt[scope] = now
+        setRefreshState(.loading, for: scope)
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            applyOperationContext(.source(source))
+            defer {
+                inFlightRefreshTasks[scope] = nil
+            }
+
+            do {
+                try await operation()
+                guard !Task.isCancelled else { return }
+                setRefreshState(.success(Date()), for: scope)
+            } catch is CancellationError {
+                // Sign-out/reset intentionally cancels in-flight refreshes.
+            } catch {
+                guard !Task.isCancelled else { return }
+                setRefreshState(.error(error.localizedDescription), for: scope)
+                handleError(error, source: source, presentToUser: false)
+            }
+        }
+
+        inFlightRefreshTasks[scope] = task
+        await task.value
+    }
+
+    private func resetRefreshStates() {
+        homeRefreshState = .idle
+        journeyRefreshState = .idle
+        profileRefreshState = .idle
+        inFlightRefreshTasks.values.forEach { $0.cancel() }
+        inFlightRefreshTasks.removeAll()
+        lastRefreshAt.removeAll()
+    }
+
+    private func setRefreshState(_ state: RefreshState, for scope: RefreshScope) {
+        switch scope {
+        case .home:
+            homeRefreshState = state
+        case .journey:
+            journeyRefreshState = state
+        case .profile:
+            profileRefreshState = state
+        }
+    }
+
     @discardableResult
     private func runBusyTask(
         context: OperationContext,
@@ -611,6 +814,7 @@ final class AppSession: ObservableObject {
         crashReporter.setCustomValue(group != nil, forKey: "group_id_present")
         crashReporter.setCustomValue(inboundInvites.count, forKey: "inbound_invite_count")
         crashReporter.setCustomValue(events.count, forKey: "cached_event_count")
+        crashReporter.setCustomValue(aiInsightsAvailability.isEnabled, forKey: "ai_insights_enabled")
     }
 
     private func applyOperationContext(_ context: OperationContext) {
@@ -620,6 +824,124 @@ final class AppSession: ObservableObject {
         crashReporter.setCustomValue(context.tapCount, forKey: "operation_tap_count")
         crashReporter.setCustomValue(context.hasImage, forKey: "operation_has_image")
         crashReporter.setCustomValue(context.inviteResponse, forKey: "operation_invite_response")
+    }
+
+    private func startRealtimeObserversIfNeeded(for groupId: String) {
+        guard authUser != nil else {
+            stopRealtimeObservers()
+            return
+        }
+
+        guard realtimeGroupID != groupId || groupRealtimeSubscription == nil || eventsRealtimeSubscription == nil else {
+            return
+        }
+
+        stopRealtimeObservers()
+        realtimeGroupID = groupId
+
+        groupRealtimeSubscription = container.groupService.observeGroup(groupId: groupId) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let observedGroup):
+                guard self.realtimeGroupID == groupId else { return }
+                guard let observedGroup, observedGroup.status == .active else {
+                    self.handleRealtimeGroupUnavailable(groupId: groupId)
+                    return
+                }
+                self.scheduleRealtimeGroupUpdate(observedGroup, groupId: groupId)
+            case .failure(let error):
+                self.handleError(error, source: "realtime.group", presentToUser: false)
+            }
+        }
+
+        eventsRealtimeSubscription = container.eventService.observeRecentEvents(
+            groupId: groupId,
+            limit: realtimeEventLimit
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let observedEvents):
+                guard self.realtimeGroupID == groupId else { return }
+                self.scheduleRealtimeEventsUpdate(observedEvents, groupId: groupId)
+            case .failure(let error):
+                self.handleError(error, source: "realtime.events", presentToUser: false)
+            }
+        }
+    }
+
+    private func stopRealtimeObservers() {
+        groupRealtimeDebounceTask?.cancel()
+        groupRealtimeDebounceTask = nil
+        eventsRealtimeDebounceTask?.cancel()
+        eventsRealtimeDebounceTask = nil
+        inviteRealtimeRefreshTask?.cancel()
+        inviteRealtimeRefreshTask = nil
+        pendingRealtimeGroup = nil
+        pendingRealtimeEvents = nil
+        groupRealtimeSubscription?.cancel()
+        groupRealtimeSubscription = nil
+        eventsRealtimeSubscription?.cancel()
+        eventsRealtimeSubscription = nil
+        realtimeGroupID = nil
+    }
+
+    private func scheduleRealtimeGroupUpdate(_ updatedGroup: LoveGroup, groupId: String) {
+        pendingRealtimeGroup = updatedGroup
+        groupRealtimeDebounceTask?.cancel()
+        groupRealtimeDebounceTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: realtimeDebounceNanoseconds)
+            guard !Task.isCancelled,
+                  realtimeGroupID == groupId,
+                  let pendingRealtimeGroup else {
+                return
+            }
+
+            self.pendingRealtimeGroup = nil
+            if group != pendingRealtimeGroup {
+                group = pendingRealtimeGroup
+                syncCrashlyticsContext()
+            }
+        }
+    }
+
+    private func scheduleRealtimeEventsUpdate(_ updatedEvents: [LoveEvent], groupId: String) {
+        pendingRealtimeEvents = updatedEvents
+        eventsRealtimeDebounceTask?.cancel()
+        eventsRealtimeDebounceTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: realtimeDebounceNanoseconds)
+            guard !Task.isCancelled,
+                  realtimeGroupID == groupId,
+                  let pendingRealtimeEvents else {
+                return
+            }
+
+            self.pendingRealtimeEvents = nil
+            if events != pendingRealtimeEvents {
+                events = pendingRealtimeEvents
+                syncCrashlyticsContext()
+            }
+        }
+    }
+
+    private func handleRealtimeGroupUnavailable(groupId: String) {
+        guard realtimeGroupID == groupId else { return }
+        stopRealtimeObservers()
+        group = nil
+        events = []
+        syncCrashlyticsContext()
+
+        if let uid = authUser?.uid {
+            inviteRealtimeRefreshTask?.cancel()
+            inviteRealtimeRefreshTask = Task { @MainActor [weak self] in
+                await self?.refreshInboundInvites(
+                    for: uid,
+                    source: "realtime.group.unlinked",
+                    presentToUser: false
+                )
+            }
+        }
     }
 }
 

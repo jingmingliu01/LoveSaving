@@ -7,12 +7,32 @@ enum UITestScenario: String, CaseIterable {
 }
 
 @MainActor
+private final class UITestRealtimeSubscription: RealtimeSubscription {
+    private var onCancel: (() -> Void)?
+
+    init(onCancel: @escaping () -> Void) {
+        self.onCancel = onCancel
+    }
+
+    func cancel() {
+        onCancel?()
+        onCancel = nil
+    }
+
+    deinit {
+        onCancel?()
+    }
+}
+
+@MainActor
 final class UITestStore {
     var users: [String: UserProfile]
     var invites: [String: Invite]
     var groups: [String: LoveGroup]
     var eventsByGroup: [String: [LoveEvent]]
     var authUser: AuthUser?
+    private var groupObservers: [UUID: GroupObserver] = [:]
+    private var eventObservers: [UUID: EventObserver] = [:]
 
     init(
         users: [String: UserProfile],
@@ -28,9 +48,71 @@ final class UITestStore {
         self.authUser = authUser
     }
 
-    func emitGroupSnapshot(groupId: String) {}
+    func addGroupObserver(
+        groupId: String,
+        onChange: @escaping @MainActor (Result<LoveGroup?, Error>) -> Void
+    ) -> UUID {
+        let id = UUID()
+        groupObservers[id] = GroupObserver(groupId: groupId, onChange: onChange)
+        return id
+    }
 
-    func emitEventsSnapshot(groupId: String) {}
+    func removeGroupObserver(_ id: UUID) {
+        groupObservers.removeValue(forKey: id)
+    }
+
+    func addEventObserver(
+        groupId: String,
+        limit: Int,
+        onChange: @escaping @MainActor (Result<[LoveEvent], Error>) -> Void
+    ) -> UUID {
+        let id = UUID()
+        eventObservers[id] = EventObserver(groupId: groupId, limit: limit, onChange: onChange)
+        return id
+    }
+
+    func removeEventObserver(_ id: UUID) {
+        eventObservers.removeValue(forKey: id)
+    }
+
+    func emitGroupSnapshot(groupId: String) {
+        let currentGroup = groups[groupId]
+        for observer in groupObservers.values where observer.groupId == groupId {
+            observer.onChange(.success(currentGroup))
+        }
+    }
+
+    func emitEventsSnapshot(groupId: String) {
+        let currentEvents = (eventsByGroup[groupId] ?? []).sorted { $0.occurredAt > $1.occurredAt }
+        for observer in eventObservers.values where observer.groupId == groupId {
+            observer.onChange(.success(Array(currentEvents.prefix(observer.limit))))
+        }
+    }
+
+    func activeGroupListenerCount(groupId: String? = nil) -> Int {
+        guard let groupId else {
+            return groupObservers.count
+        }
+        return groupObservers.values.filter { $0.groupId == groupId }.count
+    }
+
+    func activeEventListenerCount(groupId: String? = nil) -> Int {
+        guard let groupId else {
+            return eventObservers.count
+        }
+        return eventObservers.values.filter { $0.groupId == groupId }.count
+    }
+
+    private struct GroupObserver {
+        let groupId: String
+        let onChange: @MainActor (Result<LoveGroup?, Error>) -> Void
+    }
+
+    private struct EventObserver {
+        let groupId: String
+        let limit: Int
+        let onChange: @MainActor (Result<[LoveEvent], Error>) -> Void
+    }
 
     static func makeSeeded(scenario: UITestScenario) -> UITestStore {
         let now = Date()
@@ -313,6 +395,8 @@ final class UITestGroupService: GroupServicing {
         store.eventsByGroup[group.id] = []
         try await UITestUserDataService(store: store).setCurrentGroup(uid: invite.fromUid, groupId: group.id)
         try await UITestUserDataService(store: store).setCurrentGroup(uid: invite.toUid, groupId: group.id)
+        store.emitGroupSnapshot(groupId: group.id)
+        store.emitEventsSnapshot(groupId: group.id)
         return group
     }
 
@@ -324,6 +408,21 @@ final class UITestGroupService: GroupServicing {
 
         for uid in current.memberIds {
             try await UITestUserDataService(store: store).setCurrentGroup(uid: uid, groupId: nil)
+        }
+        store.emitGroupSnapshot(groupId: group.id)
+        store.emitEventsSnapshot(groupId: group.id)
+    }
+
+    func observeGroup(
+        groupId: String,
+        onChange: @escaping @MainActor (Result<LoveGroup?, Error>) -> Void
+    ) -> any RealtimeSubscription {
+        let id = store.addGroupObserver(groupId: groupId, onChange: onChange)
+        store.emitGroupSnapshot(groupId: groupId)
+        return UITestRealtimeSubscription { [weak store] in
+            Task { @MainActor in
+                store?.removeGroupObserver(id)
+            }
         }
     }
 }
@@ -365,6 +464,8 @@ final class UITestEventService: EventServicing {
         group.lastEventAt = max(group.lastEventAt, draft.occurredAt)
         group.updatedAt = now
         store.groups[groupId] = group
+        store.emitGroupSnapshot(groupId: groupId)
+        store.emitEventsSnapshot(groupId: groupId)
 
         return event
     }
@@ -414,6 +515,21 @@ final class UITestEventService: EventServicing {
         events[index].media.append(media)
         events[index].updatedAt = Date()
         store.eventsByGroup[groupId] = events
+        store.emitEventsSnapshot(groupId: groupId)
+    }
+
+    func observeRecentEvents(
+        groupId: String,
+        limit: Int,
+        onChange: @escaping @MainActor (Result<[LoveEvent], Error>) -> Void
+    ) -> any RealtimeSubscription {
+        let id = store.addEventObserver(groupId: groupId, limit: limit, onChange: onChange)
+        store.emitEventsSnapshot(groupId: groupId)
+        return UITestRealtimeSubscription { [weak store] in
+            Task { @MainActor in
+                store?.removeEventObserver(id)
+            }
+        }
     }
 }
 
@@ -434,4 +550,11 @@ final class UITestMessagingService: MessagingServicing {
 
     func requestNotificationAuthorization() async throws {}
     func scheduleDailyReflectionReminder() async throws {}
+}
+
+@MainActor
+final class UITestAIInsightsAvailabilityService: AIInsightsAvailabilityServicing {
+    func fetchAvailability() async -> AIInsightsAvailability {
+        .unavailable(reason: "AI Insights backend is disabled in UI test mode.")
+    }
 }

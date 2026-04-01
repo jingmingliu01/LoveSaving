@@ -14,6 +14,7 @@ struct AppContainer {
     let eventService: EventServicing
     let mediaService: MediaServicing
     let messagingService: MessagingServicing
+    let aiInsightsAvailabilityService: AIInsightsAvailabilityServicing
     let crashReporter: any CrashlyticsReporting
     let runtimeMode: AppRuntimeMode
 
@@ -25,6 +26,7 @@ struct AppContainer {
         eventService: EventServicing,
         mediaService: MediaServicing,
         messagingService: MessagingServicing,
+        aiInsightsAvailabilityService: AIInsightsAvailabilityServicing,
         crashReporter: any CrashlyticsReporting = NoopCrashlyticsReporter(),
         runtimeMode: AppRuntimeMode = .live
     ) {
@@ -35,6 +37,7 @@ struct AppContainer {
         self.eventService = eventService
         self.mediaService = mediaService
         self.messagingService = messagingService
+        self.aiInsightsAvailabilityService = aiInsightsAvailabilityService
         self.crashReporter = crashReporter
         self.runtimeMode = runtimeMode
     }
@@ -54,6 +57,7 @@ struct AppContainer {
         eventService: FirebaseEventService(),
         mediaService: FirebaseStorageMediaService(),
         messagingService: FirebaseMessagingService(),
+        aiInsightsAvailabilityService: BackendAIInsightsAvailabilityService(),
         crashReporter: FirebaseCrashlyticsReporter(),
         runtimeMode: .live
     )
@@ -99,6 +103,7 @@ struct AppContainer {
             eventService: UITestEventService(store: store),
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
+            aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
             crashReporter: NoopCrashlyticsReporter(),
             runtimeMode: .uiTest(scenario)
         )

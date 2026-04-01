@@ -80,6 +80,11 @@
             value = "none"
             isEnabled = "YES">
          </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "LOVESAVING_AI_INSIGHTS_BASE_URL"
+            value = "http://127.0.0.1:8080"
+            isEnabled = "YES">
+         </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction

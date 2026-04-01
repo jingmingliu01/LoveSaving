@@ -8,7 +8,7 @@ Provide a safe first CD step for this repo:
 
 - merge code into `main`
 - manually click a GitHub Actions workflow
-- deploy Firebase configuration to the `alpha` environment
+- deploy Firebase configuration and Functions to the `alpha` environment
 
 There are now two manual alpha workflows:
 

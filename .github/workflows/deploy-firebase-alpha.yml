@@ -1,0 +1,79 @@
+name: Deploy Firebase Alpha
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-firebase-alpha
+  cancel-in-progress: false
+
+jobs:
+  deploy-firebase-alpha:
+    name: Deploy Firebase config to alpha
+    runs-on: ubuntu-latest
+    environment: alpha
+
+    steps:
+      - name: Guard branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "This workflow only deploys from main."
+          echo "Current ref: $GITHUB_REF"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+
+      - name: Validate Firebase config files
+        run: |
+          set -euo pipefail
+          jq empty Firebase/firebase.json
+          jq empty Firebase/firestore.indexes.json
+          test -s Firebase/firestore.rules
+          test -s Firebase/storage.rules
+          grep -E "rules_version\\s*=\\s*'2'" Firebase/firestore.rules
+
+      - name: Materialize Firebase service account
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FIREBASE_SERVICE_ACCOUNT_JSON}" ]; then
+            echo "Missing FIREBASE_SERVICE_ACCOUNT_JSON secret in GitHub environment alpha"
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/firebase"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/firebase/service-account.json"
+          jq empty "$RUNNER_TEMP/firebase/service-account.json" >/dev/null
+
+      - name: Deploy Firestore rules, indexes, and Storage rules
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase/service-account.json
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FIREBASE_PROJECT_ID}" ]; then
+            echo "Missing FIREBASE_PROJECT_ID secret in GitHub environment alpha"
+            exit 1
+          fi
+
+          firebase deploy \
+            --project "$FIREBASE_PROJECT_ID" \
+            --config Firebase/firebase.json \
+            --only firestore:rules,firestore:indexes,storage \
+            --non-interactive

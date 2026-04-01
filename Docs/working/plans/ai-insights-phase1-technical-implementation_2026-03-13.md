@@ -458,10 +458,12 @@ Phase 1 should explicitly provision these composite indexes:
 
 - `aiChats`: `ownerUid ASC`, `lastMessageAt DESC`
   - supports listing chats for one user ordered by recent activity
-- `aiChats`: `ownerUid ASC`, `contextGroupId ASC`, `lastMessageAt DESC`
+- `aiChats`: `contextGroupId ASC`, `ownerUid ASC`, `lastMessageAt DESC`
   - supports finding the most recent chat for one user within one group context
+- `messages`: `role ASC`, `createdAt ASC`
+  - supports deriving the first user-authored message for asynchronous title generation
 
-The backend hot path already depends on the second query shape when refreshing user-scoped memory against the most recent chat for a group.
+The backend hot path already depends on the second query shape when refreshing user-scoped memory against the most recent chat for a group, and the title generation path depends on the `messages` index.
 
 ### 8.3 Why AI chats should be user-private
 

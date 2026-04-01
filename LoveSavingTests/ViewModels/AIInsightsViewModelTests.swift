@@ -65,6 +65,7 @@ final class AIInsightsViewModelTests: XCTestCase {
         let viewModel = AIInsightsViewModel()
         let session = makeSession(service: service)
         viewModel.configureIfNeeded(service: service)
+        await session.refreshAIInsightsAvailability()
 
         await viewModel.loadIfNeeded(session: session)
         XCTAssertTrue(viewModel.threads.isEmpty)

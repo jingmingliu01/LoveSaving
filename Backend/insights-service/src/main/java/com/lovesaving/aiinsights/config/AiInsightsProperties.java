@@ -7,9 +7,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AiInsightsProperties {
 
     private String role = "api";
-    private String authMode = "local";
-    private String llmMode = "stub";
-    private String storageMode = "memory";
+    private String authMode = "firebase";
+    private String llmMode = "openai";
+    private String storageMode = "firestore";
     private String taskMode = "direct";
     private String localDebugUserId = "local-dev-user";
     private String internalTaskSharedSecret;

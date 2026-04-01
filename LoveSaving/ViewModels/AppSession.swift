@@ -82,6 +82,10 @@ final class AppSession: ObservableObject {
         group?.status == .active
     }
 
+    var aiInsightsService: AIInsightsServicing {
+        container.aiInsightsService
+    }
+
     func updateCrashlyticsRoute(_ route: String) {
         crashRoute = route
         syncCrashlyticsContext()

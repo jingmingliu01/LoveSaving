@@ -18,6 +18,44 @@ struct AIInsightsCapabilities: Equatable, Decodable {
     let reason: String?
 }
 
+struct AIInsightThread: Identifiable, Codable, Equatable, Sendable {
+    var chatId: String
+    var title: String
+    var lastMessagePreview: String?
+    var lastMessageRole: String?
+    var lastMessageAt: Date?
+    var contextGroupId: String
+    var groupNameAtCreation: String?
+    var isDeleted: Bool
+
+    var id: String { chatId }
+}
+
+struct AIInsightMessage: Identifiable, Codable, Equatable, Sendable {
+    var messageId: String
+    var role: String
+    var messageType: String
+    var content: String
+    var createdAt: Date
+
+    var id: String { messageId }
+
+    var isUser: Bool {
+        role == "user"
+    }
+}
+
+struct AIInsightRenameResult: Equatable, Codable, Sendable {
+    let chatId: String
+    let title: String
+}
+
+enum AIInsightStreamEvent: Equatable, Sendable {
+    case metadata(chatId: String, uid: String, groupId: String)
+    case delta(String)
+    case done(title: String)
+}
+
 enum AIInsightsAvailability: Equatable {
     case checking
     case unavailable(reason: String)
@@ -101,6 +139,7 @@ protocol AuthServicing {
     var currentUser: AuthUser? { get }
     func authStateStream() -> AsyncStream<AuthUser?>
     func ensureSessionReady() async throws
+    func currentIDToken() async throws -> String?
     func signUp(email: String, password: String, displayName: String) async throws -> AuthUser
     func signIn(email: String, password: String) async throws -> AuthUser
     func signOut() throws
@@ -171,4 +210,12 @@ protocol MessagingServicing {
 
 protocol AIInsightsAvailabilityServicing {
     func fetchAvailability() async -> AIInsightsAvailability
+}
+
+protocol AIInsightsServicing {
+    func fetchThreads() async throws -> [AIInsightThread]
+    func fetchMessages(chatId: String) async throws -> [AIInsightMessage]
+    func streamReply(chatId: String, contextGroupId: String, message: String) -> AsyncThrowingStream<AIInsightStreamEvent, Error>
+    func renameThread(chatId: String, title: String) async throws -> AIInsightRenameResult
+    func softDeleteThread(chatId: String) async throws
 }

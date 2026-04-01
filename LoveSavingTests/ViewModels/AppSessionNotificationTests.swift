@@ -35,6 +35,8 @@ final class AppSessionNotificationTests: XCTestCase {
             mediaService: UITestMediaService(),
             messagingService: messaging,
             aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
+            aiInsightsService: UITestAIInsightsService(),
+            crashReporter: CrashlyticsReporterSpy(),
             runtimeMode: .uiTest(.linked)
         )
         return AppSession(container: container)

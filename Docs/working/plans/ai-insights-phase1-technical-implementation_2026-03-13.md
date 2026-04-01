@@ -1,10 +1,15 @@
 # LoveSaving AI Insights Phase 1 Technical Implementation
 
-Last updated: 2026-03-13
+Last updated: 2026-04-01
 
 ## 1. Document Goal
 
 This document describes the detailed technical implementation for `AI Insights` Phase 1.
+
+Important:
+- this document remains the Phase 1 cloud / deployment blueprint
+- for the **current local development workflow**, use [`ai-insights-local-backend-runbook_2026-03-31.md`](Docs/working/plans/ai-insights-local-backend-runbook_2026-03-31.md)
+- the local runbook supersedes older assumptions that local development defaults to `local + stub + memory`
 
 It is intended to answer two questions at the same time:
 

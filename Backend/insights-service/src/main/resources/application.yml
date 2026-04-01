@@ -21,9 +21,9 @@ management:
 
 ai:
   role: ${APP_ROLE:api}
-  auth-mode: ${AI_AUTH_MODE:local}
-  llm-mode: ${AI_LLM_MODE:stub}
-  storage-mode: ${AI_STORAGE_MODE:memory}
+  auth-mode: ${AI_AUTH_MODE:firebase}
+  llm-mode: ${AI_LLM_MODE:openai}
+  storage-mode: ${AI_STORAGE_MODE:firestore}
   task-mode: ${AI_TASK_MODE:direct}
   local-debug-user-id: ${AI_LOCAL_DEBUG_USER_ID:local-dev-user}
   internal-task-shared-secret: ${AI_INTERNAL_TASK_SHARED_SECRET:}

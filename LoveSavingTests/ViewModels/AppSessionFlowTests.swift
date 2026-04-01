@@ -296,7 +296,6 @@ final class AppSessionFlowTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 700_000_000)
         XCTAssertEqual(publishCount, 0)
     }
-
     func testUpdateJourneyEventCanAddAndRemoveImage() async {
         let session = makeSession(scenario: .linked).session
         await waitUntil("auth observer loads linked group") {

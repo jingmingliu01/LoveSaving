@@ -82,7 +82,7 @@ This means:
 
 For a step-by-step local startup guide, use:
 
-- `/Users/jimmy/Desktop/LoveSaving/Docs/working/plans/ai-insights-local-backend-runbook_2026-03-31.md`
+- [ai-insights-local-backend-runbook_2026-03-31.md](../../Docs/working/plans/ai-insights-local-backend-runbook_2026-03-31.md)
 
 For local development, the recommended default modes are:
 
@@ -98,11 +98,13 @@ For cloud cold-path task dispatch, switch to:
 - `AI_TASK_MODE=cloud_tasks`
 - `TASK_SERVICE_URL=https://<task-service-url>`
 - `CLOUD_TASKS_INVOKER_SERVICE_ACCOUNT_EMAIL=<cloud-tasks-invoker-sa>`
+- `AI_INTERNAL_TASK_SHARED_SECRET=<shared-secret>`
 
 In that mode:
 
 - `api-service` enqueues title and memory refresh work into Cloud Tasks
 - `task-service` executes `/internal/tasks/*` handlers
+- `/internal/tasks/*` requires the shared secret outside local auth mode
 - local mode still stays `direct`
 
 For cloud-backed persistence, switch to:
@@ -115,5 +117,5 @@ In that mode:
 - `groups/{groupId}` and `groups/{groupId}/events/{eventId}` are read using the existing iOS/Firebase schema
 - `aiChats/{chatId}` stays user-private via `ownerUid` and `contextGroupId`
 - `aiMemories/{ownerUid__groupId}` is scoped per user and group
-- requires the `aiChats` composite indexes declared in `/Users/jimmy/Desktop/LoveSaving/Firebase/firestore.indexes.json`
+- requires the `aiChats` composite indexes declared in [Firebase/firestore.indexes.json](../../Firebase/firestore.indexes.json)
 - local mode still stays `memory`

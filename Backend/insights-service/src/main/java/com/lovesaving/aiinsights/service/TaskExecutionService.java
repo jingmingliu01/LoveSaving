@@ -12,10 +12,12 @@ public class TaskExecutionService {
     }
 
     public String refreshMemory(String ownerUid, String chatId, String groupId) {
+        insightStorage.assertGroupAccess(ownerUid, groupId);
         return insightStorage.refreshMemory(groupId, ownerUid);
     }
 
     public String generateTitle(String ownerUid, String chatId, String groupId) {
+        insightStorage.assertGroupAccess(ownerUid, groupId);
         return insightStorage.generateTitle(ownerUid, chatId, groupId);
     }
 }

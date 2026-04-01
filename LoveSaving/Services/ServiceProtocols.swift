@@ -169,7 +169,6 @@ protocol MessagingServicing {
     var tokenStream: AsyncStream<String> { get }
 }
 
-@MainActor
 protocol AIInsightsAvailabilityServicing {
     func fetchAvailability() async -> AIInsightsAvailability
 }

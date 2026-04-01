@@ -341,7 +341,7 @@ service cloud.firestore {
         && d.createdAt == request.time;
     }
 
-    function validAiChatCreate() {
+    function validAiChatCreate(chatId) {
       let d = request.resource.data;
       return d.keys().hasAll([
           "ownerUid", "contextGroupId", "visibility", "createdAt", "updatedAt", "lastMessageAt"
@@ -352,6 +352,7 @@ service cloud.firestore {
           "createdAt", "updatedAt", "lastMessageAt", "lastMessagePreview", "lastMessageRole"
         ])
         && d.ownerUid == request.auth.uid
+        && (!d.keys().hasAny(["chatId"]) || d.chatId == chatId)
         && d.contextGroupId is string
         && isGroupParticipant(d.contextGroupId)
         && d.visibility == "private"
@@ -389,7 +390,7 @@ service cloud.firestore {
         && d.lastMessageAt == request.time;
     }
 
-    function validAiMessageCreate() {
+    function validAiMessageCreate(chatId) {
       let d = request.resource.data;
       return d.keys().hasAll(["ownerUid", "contextGroupId", "role", "messageType", "content", "createdAt"])
         && d.keys().hasOnly([
@@ -398,6 +399,7 @@ service cloud.firestore {
         ])
         && d.ownerUid == request.auth.uid
         && d.contextGroupId is string
+        && d.contextGroupId == get(/databases/$(database)/documents/aiChats/$(chatId)).data.contextGroupId
         && isGroupParticipant(d.contextGroupId)
         && d.role in ["user", "assistant", "system"]
         && d.messageType is string
@@ -411,7 +413,7 @@ service cloud.firestore {
         && d.createdAt == request.time;
     }
 
-    function validAiMemoryWrite() {
+    function validAiMemoryWrite(memoryId) {
       let d = request.resource.data;
       return d.keys().hasAll([
           "ownerUid", "contextGroupId", "summary", "sourceWindowStart", "sourceWindowEnd",
@@ -422,6 +424,7 @@ service cloud.firestore {
           "lastRefreshAt", "sourceEventCount", "sourceMessageCount", "updatedBy", "updatedAt"
         ])
         && d.ownerUid == request.auth.uid
+        && memoryId == request.auth.uid + "__" + d.contextGroupId
         && d.contextGroupId is string
         && isGroupParticipant(d.contextGroupId)
         && d.summary is string
@@ -516,7 +519,7 @@ service cloud.firestore {
     }
 
     match /aiChats/{chatId} {
-      allow create: if isSignedIn() && validAiChatCreate();
+      allow create: if isSignedIn() && validAiChatCreate(chatId);
       allow read: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow update: if isSignedIn() && resource.data.ownerUid == request.auth.uid && validAiChatUpdate();
       allow delete: if false;
@@ -524,7 +527,7 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow create: if isSignedIn()
           && get(/databases/$(database)/documents/aiChats/$(chatId)).data.ownerUid == request.auth.uid
-          && validAiMessageCreate();
+          && validAiMessageCreate(chatId);
         allow read: if isSignedIn()
           && get(/databases/$(database)/documents/aiChats/$(chatId)).data.ownerUid == request.auth.uid;
         allow update, delete: if false;
@@ -532,7 +535,7 @@ service cloud.firestore {
     }
 
     match /aiMemories/{memoryId} {
-      allow create, update: if isSignedIn() && validAiMemoryWrite();
+      allow create, update: if isSignedIn() && validAiMemoryWrite(memoryId);
       allow read: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
       allow delete: if false;
     }

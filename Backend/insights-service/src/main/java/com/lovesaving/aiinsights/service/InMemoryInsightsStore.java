@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +33,13 @@ public class InMemoryInsightsStore implements InsightStorage {
             memoryKey("local-dev-user", "local-dev-group"),
             "This couple responds well to gentle, specific suggestions and usually reconnects through small rituals."
         );
+    }
+
+    @Override
+    public void assertGroupAccess(String ownerUid, String groupId) {
+        if (!eventsByGroup.containsKey(groupId)) {
+            throw new AiInsightsAccessDeniedException("Unknown or inaccessible group");
+        }
     }
 
     @Override
@@ -89,7 +97,7 @@ public class InMemoryInsightsStore implements InsightStorage {
     }
 
     private void appendMessage(String chatId, String role, String content) {
-        messagesByChat.computeIfAbsent(chatId, ignored -> new ArrayList<>())
+        messagesByChat.computeIfAbsent(chatId, ignored -> new CopyOnWriteArrayList<>())
             .add(new InMemoryChatMessage(role, content, Instant.now()));
     }
 

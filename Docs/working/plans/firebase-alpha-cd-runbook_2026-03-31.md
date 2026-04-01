@@ -26,7 +26,7 @@ It does **not** deploy:
 
 Workflow file:
 
-- [deploy-firebase-alpha.yml](/Users/jimmy/Desktop/LoveSaving/.github/workflows/deploy-firebase-alpha.yml)
+- [deploy-firebase-alpha.yml](../../../.github/workflows/deploy-firebase-alpha.yml)
 
 Trigger:
 

@@ -4,6 +4,6 @@ import jakarta.validation.constraints.NotBlank;
 
 public record ChatTurnRequest(
     @NotBlank String message,
-    String contextGroupId
+    @NotBlank String contextGroupId
 ) {
 }

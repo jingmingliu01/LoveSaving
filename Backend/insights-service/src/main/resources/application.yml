@@ -26,6 +26,7 @@ ai:
   storage-mode: ${AI_STORAGE_MODE:memory}
   task-mode: ${AI_TASK_MODE:direct}
   local-debug-user-id: ${AI_LOCAL_DEBUG_USER_ID:local-dev-user}
+  internal-task-shared-secret: ${AI_INTERNAL_TASK_SHARED_SECRET:}
   firebase-project-id: ${FIREBASE_PROJECT_ID:}
   openai-api-key: ${OPENAI_API_KEY:}
   primary-model-provider: ${PRIMARY_MODEL_PROVIDER:openai}

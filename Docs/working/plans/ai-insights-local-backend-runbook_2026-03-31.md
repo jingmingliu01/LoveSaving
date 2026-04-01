@@ -48,10 +48,10 @@ This is deliberate. The local mode is not a second backend. It is a local adapte
 
 ## Files to know
 
-- Backend root: `/Users/jimmy/Desktop/LoveSaving/Backend/insights-service`
-- Local env file: `/Users/jimmy/Desktop/LoveSaving/Backend/insights-service/.env.local`
-- Local env template: `/Users/jimmy/Desktop/LoveSaving/Backend/insights-service/.env.sample`
-- Spring config: `/Users/jimmy/Desktop/LoveSaving/Backend/insights-service/src/main/resources/application.yml`
+- Backend root: `Backend/insights-service`
+- Local env file: `Backend/insights-service/.env.local`
+- Local env template: `Backend/insights-service/.env.sample`
+- Spring config: `Backend/insights-service/src/main/resources/application.yml`
 
 ## Prerequisites
 
@@ -133,7 +133,7 @@ Use this only when you explicitly want a paid integration check.
 From repo root:
 
 ```zsh
-cd /Users/jimmy/Desktop/LoveSaving/Backend/insights-service
+cd Backend/insights-service
 mvn spring-boot:run
 ```
 
@@ -278,7 +278,7 @@ This is intentional. It preserves behavior while avoiding cloud coupling and spe
 Run:
 
 ```zsh
-cd /Users/jimmy/Desktop/LoveSaving/Backend/insights-service
+cd Backend/insights-service
 mvn test
 ```
 
@@ -339,6 +339,7 @@ Required settings for cloud mode:
 AI_TASK_MODE=cloud_tasks
 TASK_SERVICE_URL=https://<task-service-run-url>
 CLOUD_TASKS_INVOKER_SERVICE_ACCOUNT_EMAIL=<cloud-tasks-invoker-sa-email>
+AI_INTERNAL_TASK_SHARED_SECRET=<shared-secret>
 ```
 
 This keeps the local mode unchanged while making the cloud task path real.
@@ -364,14 +365,14 @@ The backend now supports two storage modes:
 - stores memory summaries under top-level `aiMemories/{ownerUid__groupId}`
 - reads relationship events from `groups/{groupId}/events` using the existing iOS/Firebase schema
 - formats event context from real event fields such as `type`, `delta`, `tapCount`, `occurredAt`, `location.addressText`, and `note`
-- depends on the composite indexes declared in [Firebase/firestore.indexes.json](/Users/jimmy/Desktop/LoveSaving/Firebase/firestore.indexes.json)
-- expects owner-scoped rules for `aiChats` and `aiMemories` from [Firebase/firestore.rules](/Users/jimmy/Desktop/LoveSaving/Firebase/firestore.rules)
+- depends on the composite indexes declared in [Firebase/firestore.indexes.json](../../../Firebase/firestore.indexes.json)
+- expects owner-scoped rules for `aiChats` and `aiMemories` from [Firebase/firestore.rules](../../../Firebase/firestore.rules)
 
 This means cloud deployments no longer depend on the in-memory store.
 
 To deploy the matching Firebase config later:
 
 ```bash
-cd /Users/jimmy/Desktop/LoveSaving/Firebase
+cd Firebase
 firebase deploy --only firestore:rules,firestore:indexes
 ```

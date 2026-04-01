@@ -40,6 +40,25 @@ public class FirestoreInsightStorage implements InsightStorage {
     }
 
     @Override
+    public void assertGroupAccess(String ownerUid, String groupId) {
+        try {
+            DocumentSnapshot groupSnapshot = groupDocument(groupId).get().get();
+            if (!groupSnapshot.exists()) {
+                throw new AiInsightsAccessDeniedException("Group does not exist");
+            }
+
+            Object memberIdsValue = groupSnapshot.get("memberIds");
+            if (!(memberIdsValue instanceof List<?> memberIds) || !memberIds.contains(ownerUid)) {
+                throw new AiInsightsAccessDeniedException("Authenticated user is not a participant in this group");
+            }
+        } catch (AiInsightsAccessDeniedException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to validate group access", exception);
+        }
+    }
+
+    @Override
     public LocalRelationshipContext loadContext(String ownerUid, String groupId, String chatId) {
         try {
             return new LocalRelationshipContext(
@@ -206,6 +225,7 @@ public class FirestoreInsightStorage implements InsightStorage {
         DocumentReference chatDocument = chatDocument(chatId);
         DocumentSnapshot existingSnapshot = chatDocument.get().get();
         ensureChatOwnership(ownerUid, existingSnapshot);
+        ensureChatContext(existingSnapshot, groupId);
 
         DocumentSnapshot groupSnapshot = groupDocument(groupId).get().get();
         String groupStatus = readString(groupSnapshot, "status", "unknown");
@@ -353,7 +373,17 @@ public class FirestoreInsightStorage implements InsightStorage {
         }
         String storedOwnerUid = snapshot.getString("ownerUid");
         if (storedOwnerUid != null && !storedOwnerUid.equals(ownerUid)) {
-            throw new IllegalStateException("Chat does not belong to authenticated user");
+            throw new AiInsightsAccessDeniedException("Chat does not belong to authenticated user");
+        }
+    }
+
+    private void ensureChatContext(DocumentSnapshot snapshot, String expectedGroupId) {
+        if (!snapshot.exists()) {
+            return;
+        }
+        String storedGroupId = snapshot.getString("contextGroupId");
+        if (storedGroupId != null && !storedGroupId.equals(expectedGroupId)) {
+            throw new AiInsightsAccessDeniedException("Chat is bound to a different group context");
         }
     }
 

@@ -28,7 +28,6 @@ struct AIInsightsBackendConfiguration {
     }
 }
 
-@MainActor
 final class BackendAIInsightsAvailabilityService: AIInsightsAvailabilityServicing {
     private let configuration: AIInsightsBackendConfiguration
     private let session: URLSession

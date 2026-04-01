@@ -9,6 +9,7 @@ import com.google.cloud.tasks.v2.QueueName;
 import com.google.cloud.tasks.v2.Task;
 import com.google.protobuf.ByteString;
 import com.lovesaving.aiinsights.config.AiInsightsProperties;
+import com.lovesaving.aiinsights.config.InternalTaskAuthenticationInterceptor;
 import com.lovesaving.aiinsights.model.InternalTaskRequest;
 import java.nio.charset.StandardCharsets;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -59,6 +60,14 @@ public class CloudTasksTaskPublisher implements CloudTasksPublisher {
                 .setUrl(normalizeUrl(taskServiceUrl, path))
                 .putHeaders("Content-Type", "application/json")
                 .setBody(ByteString.copyFrom(json, StandardCharsets.UTF_8));
+
+            String internalTaskSharedSecret = properties.getInternalTaskSharedSecret();
+            if (internalTaskSharedSecret != null && !internalTaskSharedSecret.isBlank()) {
+                requestBuilder.putHeaders(
+                    InternalTaskAuthenticationInterceptor.INTERNAL_TASK_SECRET_HEADER,
+                    internalTaskSharedSecret
+                );
+            }
 
             String invokerEmail = properties.getCloudTasks().getInvokerServiceAccountEmail();
             if (invokerEmail != null && !invokerEmail.isBlank()) {

@@ -52,4 +52,20 @@ class AiCapabilitiesServiceTest {
         assertThat(response.status()).isEqualTo("disabled");
         assertThat(response.reason()).isEqualTo("missing_backend_configuration");
     }
+
+    @Test
+    void reportsDisabledWhenCloudTasksModeMissesInvokerOrInternalSecret() {
+        AiInsightsProperties properties = new AiInsightsProperties();
+        properties.setRole("api");
+        properties.setLlmMode("stub");
+        properties.setTaskMode("cloud_tasks");
+        properties.setFirebaseProjectId("lovesaving-72814");
+        properties.getCloudTasks().setTaskServiceUrl("https://task-service.example.run.app");
+
+        AiCapabilitiesResponse response = new AiCapabilitiesService(properties).capabilities();
+
+        assertThat(response.enabled()).isFalse();
+        assertThat(response.status()).isEqualTo("disabled");
+        assertThat(response.reason()).isEqualTo("missing_backend_configuration");
+    }
 }

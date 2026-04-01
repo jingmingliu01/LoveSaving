@@ -235,6 +235,7 @@ final class AppSessionFlowTests: XCTestCase {
             eventService: UITestEventService(store: store),
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
+            aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
             crashReporter: CrashlyticsReporterSpy(),
             runtimeMode: .uiTest(.linked)
         )
@@ -428,6 +429,7 @@ final class AppSessionFlowTests: XCTestCase {
             eventService: UITestEventService(store: store),
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
+            aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
             crashReporter: crashReporter,
             runtimeMode: .uiTest(.signedOut)
         )
@@ -486,6 +488,7 @@ final class AppSessionFlowTests: XCTestCase {
             eventService: UITestEventService(store: store),
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
+            aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
             crashReporter: CrashlyticsReporterSpy(),
             runtimeMode: .uiTest(.signedOut)
         )
@@ -515,6 +518,7 @@ final class AppSessionFlowTests: XCTestCase {
             eventService: eventService,
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
+            aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
             runtimeMode: .uiTest(.linked)
         )
         let session = AppSession(container: container)
@@ -544,6 +548,7 @@ final class AppSessionFlowTests: XCTestCase {
             eventService: CountingEventService(store: store, fetchDelayNanoseconds: 300_000_000),
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
+            aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
             runtimeMode: .uiTest(.linked)
         )
         let session = AppSession(container: container)
@@ -575,6 +580,7 @@ final class AppSessionFlowTests: XCTestCase {
             eventService: eventService,
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
+            aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
             runtimeMode: .uiTest(.linked)
         )
         let session = AppSession(container: container)
@@ -635,6 +641,7 @@ final class AppSessionFlowTests: XCTestCase {
             eventService: UITestEventService(store: store),
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
+            aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
             crashReporter: crashReporter,
             runtimeMode: .uiTest(scenario)
         )
@@ -655,6 +662,7 @@ final class AppSessionFlowTests: XCTestCase {
             eventService: eventService,
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
+            aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
             crashReporter: CrashlyticsReporterSpy(),
             runtimeMode: .uiTest(scenario)
         )

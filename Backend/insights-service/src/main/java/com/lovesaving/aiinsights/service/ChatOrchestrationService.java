@@ -46,9 +46,8 @@ public class ChatOrchestrationService {
         String chatId,
         ChatTurnRequest request
     ) {
-        String groupId = request.contextGroupId() == null || request.contextGroupId().isBlank()
-            ? "local-dev-group"
-            : request.contextGroupId();
+        String groupId = request.contextGroupId();
+        insightStorage.assertGroupAccess(authenticatedUser.uid(), groupId);
 
         insightStorage.appendUserMessage(authenticatedUser.uid(), chatId, groupId, request.message());
         LocalRelationshipContext context = insightStorage.loadContext(authenticatedUser.uid(), groupId, chatId);

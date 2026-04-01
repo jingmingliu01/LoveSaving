@@ -12,6 +12,7 @@ public class AiInsightsProperties {
     private String storageMode = "memory";
     private String taskMode = "direct";
     private String localDebugUserId = "local-dev-user";
+    private String internalTaskSharedSecret;
     private String firebaseProjectId;
     private String openaiApiKey;
     private String primaryModelProvider = "openai";
@@ -70,6 +71,14 @@ public class AiInsightsProperties {
 
     public void setLocalDebugUserId(String localDebugUserId) {
         this.localDebugUserId = localDebugUserId;
+    }
+
+    public String getInternalTaskSharedSecret() {
+        return internalTaskSharedSecret;
+    }
+
+    public void setInternalTaskSharedSecret(String internalTaskSharedSecret) {
+        this.internalTaskSharedSecret = internalTaskSharedSecret;
     }
 
     public String getFirebaseProjectId() {
@@ -217,7 +226,11 @@ public class AiInsightsProperties {
             return firebaseProjectId != null
                 && !firebaseProjectId.isBlank()
                 && cloudTasks.taskServiceUrl != null
-                && !cloudTasks.taskServiceUrl.isBlank();
+                && !cloudTasks.taskServiceUrl.isBlank()
+                && cloudTasks.invokerServiceAccountEmail != null
+                && !cloudTasks.invokerServiceAccountEmail.isBlank()
+                && internalTaskSharedSecret != null
+                && !internalTaskSharedSecret.isBlank();
         }
 
         return false;

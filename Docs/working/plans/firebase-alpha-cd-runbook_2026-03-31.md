@@ -10,35 +10,38 @@ Provide a safe first CD step for this repo:
 - manually click a GitHub Actions workflow
 - deploy Firebase configuration to the `alpha` environment
 
-This workflow currently deploys only:
+There are now two manual alpha workflows:
 
-- Firestore rules
-- Firestore indexes
-- Cloud Storage rules
+- `Deploy Firebase Alpha`
+  - Firestore rules
+  - Firestore indexes
+  - Cloud Storage rules
+- `Deploy Firebase Functions Alpha`
+  - Firebase Functions from `Firebase/functions`
 
 It does **not** deploy:
 
-- Firebase Functions
 - Cloud Run / Spring Boot services
 - any non-Firebase GCP resources
 
 ## Workflow
 
-Workflow file:
+Workflow files:
 
 - [deploy-firebase-alpha.yml](../../../.github/workflows/deploy-firebase-alpha.yml)
+- [deploy-firebase-functions-alpha.yml](../../../.github/workflows/deploy-firebase-functions-alpha.yml)
 
 Trigger:
 
-- `workflow_dispatch`
+- both use `workflow_dispatch`
 
 Guardrail:
 
-- must run from `main`
+- both must run from `main`
 
 GitHub Environment:
 
-- `alpha`
+- both use `alpha`
 
 ## Required GitHub Environment Secrets
 
@@ -63,13 +66,48 @@ This should be the full JSON contents of a Firebase/GCP service account with per
 - Firestore rules
 - Firestore indexes
 - Storage rules
+- Firebase Functions
 
 Practical recommendation:
 
-- create one dedicated deploy service account for alpha
+- create one dedicated `alpha` deploy service account
 - do not reuse an overly broad personal credential
 
+## Recommended Alpha Deployer Service Account
+
+Recommended name:
+
+- `firebase-alpha-deployer-sa`
+
+Recommended role set if you want one `alpha` service account to cover:
+
+- Firebase config deployment
+- Firebase Functions deployment
+- future Cloud Run / Spring Boot alpha deployment
+
+Project-level roles:
+
+- `Firebase Admin`
+- `Cloud Datastore Index Admin`
+- `Service Usage Consumer`
+- `Cloud Functions Admin`
+- `Cloud Run Developer`
+- `Artifact Registry Writer`
+
+Service-account-level role:
+
+- `Service Account User`
+
+Notes:
+
+- `Service Usage Consumer` is required for Firebase CLI operations that use project services.
+- `Cloud Functions Admin` covers `firebase deploy --only functions`.
+- `Cloud Run Developer` and `Artifact Registry Writer` are not used by the Firebase workflows today, but let you reuse the same `alpha` deployer later for Spring Boot / Cloud Run CD.
+- `Service Account User` should ideally be granted on the specific runtime service accounts that future Cloud Run services and Functions use, instead of broadly across the project.
+
 ## What the workflow actually does
+
+### `Deploy Firebase Alpha`
 
 1. Verifies the run is on `main`
 2. Checks out the repo
@@ -90,9 +128,32 @@ firebase deploy \
   --non-interactive
 ```
 
-## Why this scope is intentionally narrow
+### `Deploy Firebase Functions Alpha`
 
-This is the safest first CD slice.
+1. Verifies the run is on `main`
+2. Checks out the repo
+3. Installs Node.js `20`
+4. Installs Firebase CLI
+5. Validates:
+   - `Firebase/firebase.json`
+   - `Firebase/functions/package.json`
+   - `Firebase/functions/package-lock.json`
+   - `Firebase/functions/index.js`
+6. Runs `npm ci` inside `Firebase/functions`
+7. Materializes the service account JSON from the GitHub secret
+8. Runs:
+
+```bash
+firebase deploy \
+  --project "$FIREBASE_PROJECT_ID" \
+  --config Firebase/firebase.json \
+  --only functions \
+  --non-interactive
+```
+
+## Why the workflows stay split
+
+This is safer than a single all-in-one Firebase button.
 
 It lets you establish:
 
@@ -101,19 +162,22 @@ It lets you establish:
 - Firebase credential handling
 - deploy auditability
 
-without also coupling in:
+without coupling every Firebase change to a Functions rollout.
 
-- Spring Boot container builds
-- Cloud Run deploys
-- Secret Manager wiring
-- Cloud Tasks / service account rollout
+Benefits:
+
+- rules/indexes/storage changes can ship without touching Functions
+- Functions deploy failures do not block Firebase config deploys
+- GitHub Actions history is easier to read
+- rollback scope is smaller
+
+Cloud Run / Spring Boot deployment should remain a separate workflow later.
 
 ## Future expansion
 
 Later, you can add separate workflows for:
 
-1. Firebase Functions deployment
-2. Spring Boot / Cloud Run alpha deployment
-3. Beta / production promotion
+1. Spring Boot / Cloud Run alpha deployment
+2. Beta / production promotion
 
-Those should remain separate so the current `Deploy Firebase Alpha` button stays predictable.
+The current alpha service account role set already leaves room for that future Cloud Run step, but this runbook intentionally keeps Firebase and Cloud Run as different deployment workflows.

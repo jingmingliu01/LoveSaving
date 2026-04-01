@@ -14,6 +14,7 @@ import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @RestController
 @RequestMapping("/api/v1/ai/chats")
@@ -59,12 +61,10 @@ public class AiChatController {
         HttpServletRequest request
     ) {
         AuthenticatedUser authenticatedUser = authenticatedUser(request);
-        String updatedTitle = chatThreadService.renameChat(authenticatedUser, chatId, renameChatRequest.title());
-        List<AiChatSummary> chats = chatThreadService.listChats(authenticatedUser);
-        AiChatSummary updated = chats.stream()
-            .filter(chat -> chat.chatId().equals(chatId))
-            .findFirst()
-            .orElse(new AiChatSummary(chatId, updatedTitle, null, null, null, null, null, false));
+        AiChatSummary updated = chatThreadService.renameChat(authenticatedUser, chatId, renameChatRequest.title());
+        if (updated == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Chat was not found after rename");
+        }
         return ResponseEntity.ok(updated);
     }
 

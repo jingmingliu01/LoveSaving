@@ -60,6 +60,21 @@ final class AIInsightsViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedThreadID, "thread-older")
     }
 
+    func testLoadIfNeededRetriesAfterInitialFailure() async {
+        let service = FlakyAIInsightsServiceStub()
+        let viewModel = AIInsightsViewModel()
+        let session = makeSession(service: service)
+        viewModel.configureIfNeeded(service: service)
+
+        await viewModel.loadIfNeeded(session: session)
+        XCTAssertTrue(viewModel.threads.isEmpty)
+        XCTAssertNotNil(viewModel.errorMessage)
+
+        await viewModel.loadIfNeeded(session: session)
+        XCTAssertEqual(viewModel.selectedThreadID, "thread-recent")
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     private func makeSession(service: AIInsightsServicing) -> AppSession {
         let store = UITestStore.makeSeeded(scenario: .linked)
         let auth = UITestAuthService(store: store)
@@ -203,5 +218,35 @@ private final class AIInsightsServiceStub: AIInsightsServicing {
         if let index = threads.firstIndex(where: { $0.chatId == chatId }) {
             threads[index].isDeleted = true
         }
+    }
+}
+
+@MainActor
+private final class FlakyAIInsightsServiceStub: AIInsightsServicing {
+    private let backing = AIInsightsServiceStub()
+    private var fetchThreadsAttempts = 0
+
+    func fetchThreads() async throws -> [AIInsightThread] {
+        fetchThreadsAttempts += 1
+        if fetchThreadsAttempts == 1 {
+            throw AIInsightsClientError.invalidResponse
+        }
+        return try await backing.fetchThreads()
+    }
+
+    func fetchMessages(chatId: String) async throws -> [AIInsightMessage] {
+        try await backing.fetchMessages(chatId: chatId)
+    }
+
+    func streamReply(chatId: String, contextGroupId: String, message: String) -> AsyncThrowingStream<AIInsightStreamEvent, Error> {
+        backing.streamReply(chatId: chatId, contextGroupId: contextGroupId, message: message)
+    }
+
+    func renameThread(chatId: String, title: String) async throws -> AIInsightRenameResult {
+        try await backing.renameThread(chatId: chatId, title: title)
+    }
+
+    func softDeleteThread(chatId: String) async throws {
+        try await backing.softDeleteThread(chatId: chatId)
     }
 }

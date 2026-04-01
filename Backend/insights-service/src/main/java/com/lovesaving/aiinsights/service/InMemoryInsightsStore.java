@@ -176,13 +176,13 @@ public class InMemoryInsightsStore implements InsightStorage {
     }
 
     @Override
-    public String renameChat(String ownerUid, String chatId, String title) {
+    public AiChatSummary renameChat(String ownerUid, String chatId, String title) {
         InMemoryChatThread chat = requireOwnedChat(ownerUid, chatId);
         chat.title = sanitizeTitle(title);
         chat.isTitleUserDefined = true;
         chat.titleStatus = "user_defined";
         chat.updatedAt = Instant.now();
-        return chat.title;
+        return toSummary(chat);
     }
 
     @Override

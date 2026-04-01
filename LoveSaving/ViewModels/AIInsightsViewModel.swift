@@ -33,12 +33,13 @@ final class AIInsightsViewModel: ObservableObject {
     func loadIfNeeded(session: AppSession) async {
         guard session.aiInsightsAvailability.isEnabled else { return }
         guard !hasLoadedInitialState else { return }
-        await refreshThreads(selectMostRecent: true)
-        hasLoadedInitialState = true
+        let loaded = await refreshThreads(selectMostRecent: true)
+        hasLoadedInitialState = loaded
     }
 
-    func refreshThreads(selectMostRecent: Bool = false) async {
-        guard let service else { return }
+    @discardableResult
+    func refreshThreads(selectMostRecent: Bool = false) async -> Bool {
+        guard let service else { return false }
         isLoadingThreads = true
         defer { isLoadingThreads = false }
 
@@ -58,9 +59,11 @@ final class AIInsightsViewModel: ObservableObject {
             } else {
                 messages = []
             }
+            return errorMessage == nil
         } catch {
             logger.error("Failed to load AI Insights threads: \(String(describing: error), privacy: .public)")
             errorMessage = error.localizedDescription
+            return false
         }
     }
 

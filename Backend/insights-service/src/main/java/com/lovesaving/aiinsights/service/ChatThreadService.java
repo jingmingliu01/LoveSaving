@@ -23,7 +23,7 @@ public class ChatThreadService {
         return insightStorage.loadMessages(authenticatedUser.uid(), chatId);
     }
 
-    public String renameChat(AuthenticatedUser authenticatedUser, String chatId, String title) {
+    public AiChatSummary renameChat(AuthenticatedUser authenticatedUser, String chatId, String title) {
         return insightStorage.renameChat(authenticatedUser.uid(), chatId, title);
     }
 

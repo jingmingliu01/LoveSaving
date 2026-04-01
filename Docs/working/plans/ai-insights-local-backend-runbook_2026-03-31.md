@@ -132,8 +132,7 @@ If this is missing, Firestore-backed local mode will fail.
 From repo root:
 
 ```bash
-cd /Users/jimmy/Desktop/LoveSaving/Backend/insights-service
-source ~/.zshrc
+cd Backend/insights-service
 mvn spring-boot:run
 ```
 

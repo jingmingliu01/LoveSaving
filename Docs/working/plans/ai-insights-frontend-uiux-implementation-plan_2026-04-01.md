@@ -446,7 +446,7 @@ Use structured logs where possible so local debugging and future Cloud Run debug
 
 Continue to rely on:
 
-- `mvn test`
+- `./mvnw test` from `Backend/insights-service`
 - local curl validation for streaming and capabilities
 
 ### iOS Validation

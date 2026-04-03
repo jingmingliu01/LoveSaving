@@ -94,6 +94,12 @@ For a step-by-step local startup guide, use:
 
 - [ai-insights-local-backend-runbook_2026-03-31.md](../../Docs/working/plans/ai-insights-local-backend-runbook_2026-03-31.md)
 
+Build and run backend commands from `Backend/insights-service` with the checked-in Maven Wrapper:
+
+- `./mvnw spring-boot:run`
+- `./mvnw test`
+
+On Windows, use `mvnw.cmd spring-boot:run` and `mvnw.cmd test` in Command Prompt or PowerShell. If you are using Git Bash or another Unix-like shell on Windows, `./mvnw ...` also works.
 The older backend-only isolated modes still exist:
 
 - `AI_AUTH_MODE=local`

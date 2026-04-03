@@ -136,6 +136,8 @@ cd Backend/insights-service
 ./mvnw spring-boot:run
 ```
 
+On Windows, use `mvnw.cmd spring-boot:run` in PowerShell or Command Prompt.
+If you are using Git Bash on Windows, `./mvnw spring-boot:run` works there as well.
 Expected local address:
 
 - `http://localhost:8080`

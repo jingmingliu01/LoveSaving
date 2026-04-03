@@ -133,7 +133,7 @@ From repo root:
 
 ```bash
 cd Backend/insights-service
-mvn spring-boot:run
+./mvnw spring-boot:run
 ```
 
 Expected local address:

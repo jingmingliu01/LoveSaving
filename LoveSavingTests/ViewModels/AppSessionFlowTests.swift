@@ -26,6 +26,21 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertNil(session.globalErrorMessage)
     }
 
+    func testSendInviteShowsOutgoingInviteImmediately() async {
+        let session = makeSession(scenario: .unlinked).session
+
+        await waitUntil("auth observer loads unlinked user") {
+            session.isSignedIn && session.profile?.email == "owner@example.com"
+        }
+
+        await session.sendInvite(to: "partner@example.com")
+
+        XCTAssertEqual(session.outgoingInvites.count, 1)
+        XCTAssertEqual(session.outgoingInvites.first?.toUid, "partner")
+        XCTAssertEqual(session.outgoingInvites.first?.status, .pending)
+        XCTAssertNil(session.globalErrorMessage)
+    }
+
     func testSendInviteToUnknownUserSetsError() async {
         let session = makeSession(scenario: .linked).session
 
@@ -50,6 +65,103 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertTrue(session.isLinked)
         XCTAssertNotNil(session.group)
         XCTAssertNil(session.globalErrorMessage)
+    }
+
+    func testInviteRefreshIncludesIncomingOutgoingAndHistory() async {
+        let store = UITestStore.makeSeeded(scenario: .unlinked)
+        let now = Date()
+        store.invites["invite_outgoing_pending"] = Invite(
+            id: "invite_outgoing_pending",
+            fromUid: "owner",
+            fromDisplayName: "Owner",
+            fromEmail: "owner@example.com",
+            toUid: "partner",
+            status: .pending,
+            createdAt: now.addingTimeInterval(-120),
+            expiresAt: now.addingTimeInterval(7 * 24 * 3600)
+        )
+        store.invites["invite_incoming_rejected"] = Invite(
+            id: "invite_incoming_rejected",
+            fromUid: "partner",
+            fromDisplayName: "Partner",
+            fromEmail: "partner@example.com",
+            toUid: "owner",
+            status: .rejected,
+            createdAt: now.addingTimeInterval(-60),
+            respondedAt: now.addingTimeInterval(-30),
+            expiresAt: now.addingTimeInterval(7 * 24 * 3600)
+        )
+
+        let session = makeSession(store: store, scenario: .unlinked).session
+
+        await waitUntil("auth observer loads full invite history") {
+            session.isSignedIn && session.invites.count == 3
+        }
+
+        XCTAssertEqual(
+            session.incomingInvites.map(\.id),
+            ["invite_incoming_rejected", "invite_pending_1"]
+        )
+        XCTAssertEqual(
+            session.outgoingInvites.map(\.id),
+            ["invite_outgoing_pending"]
+        )
+        XCTAssertEqual(session.inboundInvites.map(\.id), ["invite_pending_1"])
+    }
+
+    func testInviteRefreshExpiresOutgoingPendingInvite() async {
+        let store = UITestStore.makeSeeded(scenario: .unlinked)
+        store.invites["invite_outgoing_expired"] = Invite(
+            id: "invite_outgoing_expired",
+            fromUid: "owner",
+            fromDisplayName: "Owner",
+            fromEmail: "owner@example.com",
+            toUid: "partner",
+            status: .pending,
+            createdAt: Date().addingTimeInterval(-300),
+            expiresAt: Date().addingTimeInterval(-60)
+        )
+
+        let session = makeSession(store: store, scenario: .unlinked).session
+
+        await waitUntil("auth observer expires outgoing invite") {
+            session.outgoingInvites.contains {
+                $0.id == "invite_outgoing_expired" && $0.status == .expired
+            }
+        }
+
+        XCTAssertEqual(
+            store.invites["invite_outgoing_expired"]?.status,
+            .expired
+        )
+        XCTAssertEqual(session.inboundInvites.map(\.id), ["invite_pending_1"])
+    }
+
+    func testRealtimeInviteObserverAppliesRemoteInviteWhileScreenIsOpen() async {
+        let store = UITestStore.makeSeeded(scenario: .unlinked)
+        let session = makeSession(store: store, scenario: .unlinked).session
+
+        await waitUntil("auth observer loads unlinked user") {
+            session.isSignedIn && session.incomingInvites.count == 1
+        }
+
+        let remoteInvite = Invite(
+            id: "invite_remote_realtime",
+            fromUid: "partner",
+            fromDisplayName: "Partner",
+            fromEmail: "partner@example.com",
+            toUid: "owner",
+            toDisplayName: "Owner",
+            toEmail: "owner@example.com",
+            status: .pending,
+            createdAt: Date()
+        )
+        store.invites[remoteInvite.id] = remoteInvite
+        store.emitInviteSnapshot(uid: "owner")
+
+        await waitUntil("realtime invite listener updates incoming list") {
+            session.incomingInvites.contains(where: { $0.id == remoteInvite.id })
+        }
     }
 
     func testSubmitTapBurstWithImageAddsEventMedia() async {
@@ -446,8 +558,8 @@ final class AppSessionFlowTests: XCTestCase {
         )
         XCTAssertEqual(crashReporter.customValues["group_id_present"] as? Bool, false)
         XCTAssertEqual(crashReporter.recordedErrorTypes, [String(reflecting: InviteFetchFailingService.Failure.self)])
-        XCTAssertTrue(crashReporter.logs.contains { $0.contains("auth.refresh.inboundInvites") })
-        XCTAssertEqual(crashReporter.customValues["last_operation"] as? String, "auth.refresh.inboundInvites")
+        XCTAssertTrue(crashReporter.logs.contains { $0.contains("auth.refresh.invites") })
+        XCTAssertEqual(crashReporter.customValues["last_operation"] as? String, "auth.refresh.invites")
         XCTAssertEqual(crashReporter.customValues["operation_event_type"] as? String, "none")
         XCTAssertEqual(crashReporter.customValues["operation_tap_count"] as? Int, -1)
     }
@@ -699,13 +811,22 @@ private struct InviteFetchFailingService: InviteServicing {
         toUid: String,
         expiresAt: Date?,
         fromDisplayName: String?,
-        fromEmail: String?
+        fromEmail: String?,
+        toDisplayName: String?,
+        toEmail: String?
     ) async throws -> Invite {
         fatalError("sendInvite should not be called in this test")
     }
 
-    func fetchInboundInvites(for uid: String) async throws -> [Invite] {
+    func fetchInvites(for uid: String) async throws -> [Invite] {
         throw Failure()
+    }
+
+    func observeInvites(
+        for uid: String,
+        onChange: @escaping @MainActor (Result<[Invite], Error>) -> Void
+    ) -> any RealtimeSubscription {
+        CountingRealtimeSubscription {}
     }
 
     func respondInvite(inviteId: String, status: InviteStatus, respondedAt: Date) async throws {
@@ -746,20 +867,31 @@ private final class DelayedInviteService: InviteServicing {
         toUid: String,
         expiresAt: Date?,
         fromDisplayName: String?,
-        fromEmail: String?
+        fromEmail: String?,
+        toDisplayName: String?,
+        toEmail: String?
     ) async throws -> Invite {
         try await UITestInviteService(store: store).sendInvite(
             fromUid: fromUid,
             toUid: toUid,
             expiresAt: expiresAt,
             fromDisplayName: fromDisplayName,
-            fromEmail: fromEmail
+            fromEmail: fromEmail,
+            toDisplayName: toDisplayName,
+            toEmail: toEmail
         )
     }
 
-    func fetchInboundInvites(for uid: String) async throws -> [Invite] {
+    func fetchInvites(for uid: String) async throws -> [Invite] {
         try await Task.sleep(nanoseconds: delayNanoseconds)
-        return try await UITestInviteService(store: store).fetchInboundInvites(for: uid)
+        return try await UITestInviteService(store: store).fetchInvites(for: uid)
+    }
+
+    func observeInvites(
+        for uid: String,
+        onChange: @escaping @MainActor (Result<[Invite], Error>) -> Void
+    ) -> any RealtimeSubscription {
+        UITestInviteService(store: store).observeInvites(for: uid, onChange: onChange)
     }
 
     func respondInvite(inviteId: String, status: InviteStatus, respondedAt: Date) async throws {
@@ -793,17 +925,25 @@ private final class CountingUserDataService: UserDataServicing {
         store.users.values.first { $0.email.caseInsensitiveCompare(email) == .orderedSame }
     }
 
-    func resolveUserID(identifier: String) async throws -> String? {
+    func resolveUser(identifier: String) async throws -> ResolvedUserIdentity? {
         let normalized = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return nil }
 
         if normalized.contains("@") {
-            return store.users.values.first {
+            guard let user = store.users.values.first(where: {
                 $0.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
-            }?.id
+            }) else {
+                return nil
+            }
+            return ResolvedUserIdentity(uid: user.id, displayName: user.displayName, email: user.email)
         }
 
-        return store.users[normalized] == nil ? nil : normalized
+        guard let user = store.users[normalized] else { return nil }
+        return ResolvedUserIdentity(uid: user.id, displayName: user.displayName, email: user.email)
+    }
+
+    func resolveUserID(identifier: String) async throws -> String? {
+        try await resolveUser(identifier: identifier)?.uid
     }
 
     func setCurrentGroup(uid: String, groupId: String?) async throws {

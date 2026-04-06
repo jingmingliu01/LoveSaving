@@ -25,7 +25,7 @@ final class AppSession: ObservableObject {
     @Published private(set) var authUser: AuthUser?
     @Published private(set) var profile: UserProfile?
     @Published private(set) var group: LoveGroup?
-    @Published private(set) var inboundInvites: [Invite] = []
+    @Published private(set) var invites: [Invite] = []
     @Published private(set) var events: [LoveEvent] = []
     @Published private(set) var aiInsightsAvailability: AIInsightsAvailability = .checking
     @Published private(set) var hasResolvedInitialAuthState = false
@@ -41,6 +41,7 @@ final class AppSession: ObservableObject {
     private let refreshDebounceInterval: TimeInterval = 0.6
     private var authTask: Task<Void, Never>?
     private var messagingTask: Task<Void, Never>?
+    private var inviteRealtimeSubscription: (any RealtimeSubscription)?
     private var groupRealtimeSubscription: (any RealtimeSubscription)?
     private var eventsRealtimeSubscription: (any RealtimeSubscription)?
     private var realtimeGroupID: String?
@@ -80,6 +81,21 @@ final class AppSession: ObservableObject {
 
     var isLinked: Bool {
         group?.status == .active
+    }
+
+    var inboundInvites: [Invite] {
+        guard let uid = authUser?.uid else { return [] }
+        return invites.filter { $0.toUid == uid && $0.status == .pending }
+    }
+
+    var incomingInvites: [Invite] {
+        guard let uid = authUser?.uid else { return [] }
+        return invites.filter { $0.toUid == uid }
+    }
+
+    var outgoingInvites: [Invite] {
+        guard let uid = authUser?.uid else { return [] }
+        return invites.filter { $0.fromUid == uid }
     }
 
     func updateCrashlyticsRoute(_ route: String) {
@@ -126,7 +142,7 @@ final class AppSession: ObservableObject {
         authUser = nil
         profile = nil
         group = nil
-        inboundInvites = []
+        invites = []
         events = []
         globalErrorMessage = nil
         syncCrashlyticsContext()
@@ -161,7 +177,7 @@ final class AppSession: ObservableObject {
         guard let uid = authUser?.uid else { return }
         do {
             try await container.authService.ensureSessionReady()
-            await refreshInboundInvites(for: uid, source: "invite.refresh", presentToUser: false)
+            await refreshUserInvites(for: uid, source: "invite.refresh", presentToUser: false)
         } catch {
             handleError(error, source: "invite.refresh", presentToUser: true)
         }
@@ -172,25 +188,30 @@ final class AppSession: ObservableObject {
             try await container.authService.ensureSessionReady()
             let currentUser = try await resolvedAuthUser()
 
-            guard let targetUID = try await container.userDataService.resolveUserID(identifier: identifier) else {
+            guard let recipient = try await container.userDataService.resolveUser(identifier: identifier) else {
                 throw AppError.userNotFound
             }
+
+            let targetUID = recipient.uid
 
             if targetUID == currentUser.uid {
                 throw AppError.invalidInviteState
             }
 
-            _ = try await container.inviteService.sendInvite(
+            let sentInvite = try await container.inviteService.sendInvite(
                 fromUid: currentUser.uid,
                 toUid: targetUID,
                 expiresAt: Calendar.current.date(byAdding: .day, value: 7, to: Date()),
                 fromDisplayName: profile?.displayName ?? currentUser.displayName,
-                fromEmail: profile?.email ?? currentUser.email
+                fromEmail: profile?.email ?? currentUser.email,
+                toDisplayName: recipient.displayName,
+                toEmail: recipient.email
             )
+            mergeInvite(sentInvite)
 
             // Post-send refresh should never mask a successful send.
             do {
-                inboundInvites = try await fetchActiveInboundInvites(for: currentUser.uid)
+                invites = try await fetchResolvedInvites(for: currentUser.uid)
             } catch {
                 handleError(error, source: "invite.send.postRefresh", presentToUser: false)
             }
@@ -218,24 +239,6 @@ final class AppSession: ObservableObject {
                 status: status,
                 respondedAt: respondedAt
             )
-
-            if accept {
-                let acceptedInvite = Invite(
-                    id: invite.id,
-                    fromUid: invite.fromUid,
-                    fromDisplayName: invite.fromDisplayName,
-                    fromEmail: invite.fromEmail,
-                    toUid: invite.toUid,
-                    status: .accepted,
-                    createdAt: invite.createdAt,
-                    respondedAt: respondedAt,
-                    expiresAt: invite.expiresAt
-                )
-                _ = try await container.groupService.createGroupAndLinkUsers(
-                    invite: acceptedInvite,
-                    groupName: "LoveSaving Group"
-                )
-            }
 
             if let current = authUser {
                 try await refreshForAuthUser(current)
@@ -329,9 +332,9 @@ final class AppSession: ObservableObject {
                 group = nil
                 events = []
                 if let uid = authUser?.uid {
-                    await refreshInboundInvites(
+                    await refreshUserInvites(
                         for: uid,
-                        source: "home.refresh.inboundInvites",
+                        source: "home.refresh.invites",
                         presentToUser: false
                     )
                 }
@@ -348,9 +351,9 @@ final class AppSession: ObservableObject {
                 group = nil
                 events = []
                 if let uid = authUser?.uid {
-                    await refreshInboundInvites(
+                    await refreshUserInvites(
                         for: uid,
-                        source: "home.refresh.inboundInvites",
+                        source: "home.refresh.invites",
                         presentToUser: false
                     )
                 }
@@ -391,9 +394,9 @@ final class AppSession: ObservableObject {
                 stopRealtimeObservers()
                 group = nil
                 events = []
-                await refreshInboundInvites(
+                await refreshUserInvites(
                     for: currentUser.uid,
-                    source: "profile.refresh.inboundInvites",
+                    source: "profile.refresh.invites",
                     presentToUser: false
                 )
             }
@@ -596,55 +599,74 @@ final class AppSession: ObservableObject {
            let group = try await container.groupService.fetchGroup(groupId: currentGroupId),
            group.status == .active {
             self.group = group
-            inboundInvites = []
+            invites = []
+            inviteRealtimeSubscription?.cancel()
+            inviteRealtimeSubscription = nil
             events = try await container.eventService.fetchEvents(groupId: currentGroupId, limit: realtimeEventLimit)
             startRealtimeObserversIfNeeded(for: currentGroupId)
         } else {
             stopRealtimeObservers()
             self.group = nil
             events = []
-            await refreshInboundInvites(
+            await refreshUserInvites(
                 for: user.uid,
-                source: "auth.refresh.inboundInvites",
+                source: "auth.refresh.invites",
                 presentToUser: false
             )
+            startInviteRealtimeObserverIfNeeded(for: user.uid)
         }
 
         syncCrashlyticsContext()
     }
 
-    private func refreshInboundInvites(
+    private func refreshUserInvites(
         for uid: String,
         source: String,
         presentToUser: Bool
     ) async {
         do {
-            inboundInvites = try await fetchActiveInboundInvites(for: uid)
+            invites = try await fetchResolvedInvites(for: uid)
         } catch {
-            inboundInvites = []
+            invites = []
             handleError(error, source: source, presentToUser: presentToUser)
+        }
+        if group == nil {
+            startInviteRealtimeObserverIfNeeded(for: uid)
         }
         syncCrashlyticsContext()
     }
 
-    private func fetchActiveInboundInvites(for uid: String) async throws -> [Invite] {
-        let invites = try await container.inviteService.fetchInboundInvites(for: uid)
-        let now = Date()
-        var active: [Invite] = []
+    private func fetchResolvedInvites(for uid: String) async throws -> [Invite] {
+        let invites = try await container.inviteService.fetchInvites(for: uid)
+        return try await resolveInvites(invites)
+    }
 
-        for invite in invites {
-            if let expiresAt = invite.expiresAt, expiresAt <= now {
+    private func resolveInvites(_ invites: [Invite]) async throws -> [Invite] {
+        let now = Date()
+        var resolved: [Invite] = []
+
+        for var invite in invites {
+            if invite.status == .pending,
+               let expiresAt = invite.expiresAt,
+               expiresAt <= now {
                 try await container.inviteService.respondInvite(
                     inviteId: invite.id,
                     status: .expired,
                     respondedAt: now
                 )
-            } else {
-                active.append(invite)
+                invite.status = .expired
+                invite.respondedAt = now
             }
+            resolved.append(invite)
         }
 
-        return active
+        return resolved.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private func mergeInvite(_ invite: Invite) {
+        invites.removeAll { $0.id == invite.id }
+        invites.append(invite)
+        invites.sort { $0.createdAt > $1.createdAt }
     }
 
     private func deleteMediaBestEffort(_ media: [EventMedia], source: String) async {
@@ -869,6 +891,35 @@ final class AppSession: ObservableObject {
         }
     }
 
+    private func startInviteRealtimeObserverIfNeeded(for uid: String) {
+        guard authUser?.uid == uid else { return }
+        guard group == nil else { return }
+        guard inviteRealtimeSubscription == nil else { return }
+
+        inviteRealtimeSubscription = container.inviteService.observeInvites(for: uid) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let observedInvites):
+                guard self.authUser?.uid == uid, self.group == nil else { return }
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    do {
+                        let resolvedInvites = try await resolveInvites(observedInvites)
+                        guard self.authUser?.uid == uid, self.group == nil else { return }
+                        if invites != resolvedInvites {
+                            invites = resolvedInvites
+                            syncCrashlyticsContext()
+                        }
+                    } catch {
+                        handleError(error, source: "realtime.invites", presentToUser: false)
+                    }
+                }
+            case .failure(let error):
+                self.handleError(error, source: "realtime.invites", presentToUser: false)
+            }
+        }
+    }
+
     private func stopRealtimeObservers() {
         groupRealtimeDebounceTask?.cancel()
         groupRealtimeDebounceTask = nil
@@ -878,6 +929,8 @@ final class AppSession: ObservableObject {
         inviteRealtimeRefreshTask = nil
         pendingRealtimeGroup = nil
         pendingRealtimeEvents = nil
+        inviteRealtimeSubscription?.cancel()
+        inviteRealtimeSubscription = nil
         groupRealtimeSubscription?.cancel()
         groupRealtimeSubscription = nil
         eventsRealtimeSubscription?.cancel()
@@ -935,7 +988,7 @@ final class AppSession: ObservableObject {
         if let uid = authUser?.uid {
             inviteRealtimeRefreshTask?.cancel()
             inviteRealtimeRefreshTask = Task { @MainActor [weak self] in
-                await self?.refreshInboundInvites(
+                await self?.refreshUserInvites(
                     for: uid,
                     source: "realtime.group.unlinked",
                     presentToUser: false

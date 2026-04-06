@@ -15,6 +15,7 @@ struct AppContainer {
     let mediaService: MediaServicing
     let messagingService: MessagingServicing
     let aiInsightsAvailabilityService: AIInsightsAvailabilityServicing
+    let aiInsightsService: AIInsightsServicing
     let crashReporter: any CrashlyticsReporting
     let runtimeMode: AppRuntimeMode
 
@@ -27,7 +28,8 @@ struct AppContainer {
         mediaService: MediaServicing,
         messagingService: MessagingServicing,
         aiInsightsAvailabilityService: AIInsightsAvailabilityServicing,
-        crashReporter: any CrashlyticsReporting = NoopCrashlyticsReporter(),
+        aiInsightsService: AIInsightsServicing,
+        crashReporter: any CrashlyticsReporting,
         runtimeMode: AppRuntimeMode = .live
     ) {
         self.authService = authService
@@ -38,31 +40,43 @@ struct AppContainer {
         self.mediaService = mediaService
         self.messagingService = messagingService
         self.aiInsightsAvailabilityService = aiInsightsAvailabilityService
+        self.aiInsightsService = aiInsightsService
         self.crashReporter = crashReporter
         self.runtimeMode = runtimeMode
     }
 
     var isUITestMode: Bool {
-        if case .uiTest = runtimeMode {
+        switch runtimeMode {
+        case .uiTest:
             return true
+        case .live:
+            return false
         }
-        return false
     }
 
-    static let live: AppContainer = .init(
-        authService: FirebaseAuthService(),
-        userDataService: FirebaseUserDataService(),
-        inviteService: FirebaseInviteService(),
-        groupService: FirebaseGroupService(),
-        eventService: FirebaseEventService(),
-        mediaService: FirebaseStorageMediaService(),
-        messagingService: FirebaseMessagingService(),
-        aiInsightsAvailabilityService: BackendAIInsightsAvailabilityService(),
-        crashReporter: FirebaseCrashlyticsReporter(),
-        runtimeMode: .live
-    )
+    static let live: AppContainer = {
+        let authService = FirebaseAuthService()
+        return .init(
+            authService: authService,
+            userDataService: FirebaseUserDataService(),
+            inviteService: FirebaseInviteService(),
+            groupService: FirebaseGroupService(),
+            eventService: FirebaseEventService(),
+            mediaService: FirebaseStorageMediaService(),
+            messagingService: FirebaseMessagingService(),
+            aiInsightsAvailabilityService: BackendAIInsightsAvailabilityService(),
+            aiInsightsService: BackendAIInsightsService(authService: authService),
+            crashReporter: FirebaseCrashlyticsReporter(),
+            runtimeMode: .live
+        )
+    }()
 
-    static func runtimeModeForCurrentProcess(environment: [String: String] = ProcessInfo.processInfo.environment) -> AppRuntimeMode {
+    static func runtimeModeForCurrentProcess(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        runningUnderTests: Bool? = nil
+    ) -> AppRuntimeMode {
+        let isRunningTests = runningUnderTests ?? isRunningUnderTests(environment: environment)
+
         if environment["LOVESAVING_MODE"] == "LIVE" {
             return .live
         }
@@ -72,7 +86,7 @@ struct AppContainer {
             return .uiTest(scenario)
         }
 
-        if isRunningUnderTests(environment: environment) {
+        if isRunningTests {
             return .uiTest(.linked)
         }
 
@@ -104,6 +118,7 @@ struct AppContainer {
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
             aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
+            aiInsightsService: UITestAIInsightsService(),
             crashReporter: NoopCrashlyticsReporter(),
             runtimeMode: .uiTest(scenario)
         )

@@ -263,6 +263,10 @@ final class UITestAuthService: AuthServicing {
         }
     }
 
+    func currentIDToken() async throws -> String? {
+        nil
+    }
+
     func signUp(email: String, password: String, displayName: String) async throws -> AuthUser {
         let uid = "user_\(UUID().uuidString.prefix(8))"
         let user = AuthUser(uid: uid, email: email, displayName: displayName)
@@ -649,4 +653,18 @@ final class UITestAIInsightsAvailabilityService: AIInsightsAvailabilityServicing
     func fetchAvailability() async -> AIInsightsAvailability {
         .unavailable(reason: "AI Insights backend is disabled in UI test mode.")
     }
+}
+
+struct UITestAIInsightsService: AIInsightsServicing {
+    func fetchThreads() async throws -> [AIInsightThread] { [] }
+    func fetchMessages(chatId: String) async throws -> [AIInsightMessage] { [] }
+    func streamReply(chatId: String, contextGroupId: String, message: String) -> AsyncThrowingStream<AIInsightStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
+    func renameThread(chatId: String, title: String) async throws -> AIInsightRenameResult {
+        AIInsightRenameResult(chatId: chatId, title: title)
+    }
+    func softDeleteThread(chatId: String) async throws {}
 }

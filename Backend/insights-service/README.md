@@ -1,6 +1,6 @@
 # LoveSaving AI Insights Backend
 
-This is the Phase 1 Spring Boot skeleton for `AI Insights`.
+This is the Phase 1 Spring Boot backend for `AI Insights`.
 
 ## Phase 1 scope
 
@@ -75,23 +75,38 @@ For local development, the backend can load `Backend/insights-service/.env.local
 - `.env.local` only fills in missing values
 - Cloud Run should continue to use Secret Manager -> environment variable injection
 
-This means:
+The **current recommended app-level local workflow** is:
 
-- local machine: `.env.local` is convenient
-- Cloud Run: Secret Manager remains the source of truth
+- `AI_AUTH_MODE=firebase`
+- `AI_LLM_MODE=openai`
+- `AI_STORAGE_MODE=firestore`
+- `AI_TASK_MODE=direct`
+
+That means:
+
+- the iOS app signs in through normal Firebase Auth
+- protected AI routes require a real Firebase bearer token
+- AI chat / memory / title state is stored in real Firestore
+- title / memory follow-up work runs inline instead of Cloud Tasks
+- local development stays close to real production semantics without requiring Cloud Run
 
 For a step-by-step local startup guide, use:
 
 - [ai-insights-local-backend-runbook_2026-03-31.md](../../Docs/working/plans/ai-insights-local-backend-runbook_2026-03-31.md)
 
-For local development, the recommended default modes are:
+Build and run backend commands from `Backend/insights-service` with the checked-in Maven Wrapper:
+
+- `./mvnw spring-boot:run`
+- `./mvnw test`
+
+On Windows, use `mvnw.cmd spring-boot:run` and `mvnw.cmd test` in Command Prompt or PowerShell. If you are using Git Bash or another Unix-like shell on Windows, `./mvnw ...` also works.
+The older backend-only isolated modes still exist:
 
 - `AI_AUTH_MODE=local`
 - `AI_LLM_MODE=stub`
 - `AI_STORAGE_MODE=memory`
-- `AI_TASK_MODE=direct`
 
-That keeps local development fast, cheap, and independent from GCP.
+but they are now meant only for backend diagnosis and tests, not as the normal Simulator flow.
 
 For cloud cold-path task dispatch, switch to:
 
@@ -118,4 +133,26 @@ In that mode:
 - `aiChats/{chatId}` stays user-private via `ownerUid` and `contextGroupId`
 - `aiMemories/{ownerUid__groupId}` is scoped per user and group
 - requires the `aiChats` composite indexes declared in [Firebase/firestore.indexes.json](../../Firebase/firestore.indexes.json)
-- local mode still stays `memory`
+- backend-only isolated mode can still use `memory`
+
+## Local auth expectations
+
+In the current recommended local flow:
+
+- `GET /api/v1/ai/capabilities` is public
+- `/api/v1/ai/chats/**` requires `Authorization: Bearer <Firebase ID token>`
+
+So if you `curl` a protected AI endpoint directly and see:
+
+```json
+{"status":"unauthorized","reason":"missing_bearer_token"}
+```
+
+that is expected.
+
+The easiest end-to-end validation path is:
+
+1. run Spring Boot locally
+2. set `LOVESAVING_AI_INSIGHTS_BASE_URL=http://127.0.0.1:8080` in the Xcode run scheme
+3. sign in normally in the app
+4. use AI Insights through the app, which will attach the Firebase ID token automatically

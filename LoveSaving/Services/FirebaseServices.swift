@@ -72,11 +72,17 @@ final class FirebaseAuthService: AuthServicing {
     }
 
     func ensureSessionReady() async throws {
-        guard let user = auth.currentUser else {
+        guard try await currentIDToken() != nil else {
             throw AppError.missingAuthUser
         }
+    }
 
-        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthTokenResult, Error>) in
+    func currentIDToken() async throws -> String? {
+        guard let user = auth.currentUser else {
+            return nil
+        }
+
+        let tokenResult = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthTokenResult, Error>) in
             user.getIDTokenResult(forcingRefresh: false) { tokenResult, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -87,6 +93,7 @@ final class FirebaseAuthService: AuthServicing {
                 }
             }
         }
+        return tokenResult.token
     }
 
     func signUp(email: String, password: String, displayName: String) async throws -> AuthUser {

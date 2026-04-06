@@ -10,6 +10,8 @@ import com.google.cloud.firestore.Query;
 import com.google.cloud.firestore.QueryDocumentSnapshot;
 import com.google.cloud.firestore.QuerySnapshot;
 import com.google.cloud.firestore.SetOptions;
+import com.lovesaving.aiinsights.model.AiChatMessage;
+import com.lovesaving.aiinsights.model.AiChatSummary;
 import com.lovesaving.aiinsights.model.InMemoryChatMessage;
 import com.lovesaving.aiinsights.model.LocalRelationshipContext;
 import java.time.Instant;
@@ -74,6 +76,47 @@ public class FirestoreInsightStorage implements InsightStorage {
     }
 
     @Override
+    public List<AiChatSummary> listVisibleChats(String ownerUid) {
+        try {
+            QuerySnapshot snapshot = firestore.collection(COLLECTION_AI_CHATS)
+                .whereEqualTo("ownerUid", ownerUid)
+                .orderBy("lastMessageAt", Query.Direction.DESCENDING)
+                .limit(50)
+                .get()
+                .get();
+
+            return snapshot.getDocuments().stream()
+                .filter(document -> !Boolean.TRUE.equals(document.getBoolean("isDeleted")))
+                .map(this::toChatSummary)
+                .toList();
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to list Firestore-backed chats", exception);
+        }
+    }
+
+    @Override
+    public List<AiChatMessage> loadMessages(String ownerUid, String chatId) {
+        try {
+            DocumentSnapshot chatSnapshot = chatDocument(chatId).get().get();
+            ensureChatOwnership(ownerUid, chatSnapshot);
+
+            return chatMessages(chatId)
+                .orderBy("createdAt", Query.Direction.ASCENDING)
+                .get()
+                .get()
+                .getDocuments()
+                .stream()
+                .map(this::toApiChatMessage)
+                .filter(Objects::nonNull)
+                .toList();
+        } catch (AiInsightsAccessDeniedException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to load Firestore-backed chat messages", exception);
+        }
+    }
+
+    @Override
     public void appendUserMessage(String ownerUid, String chatId, String groupId, String content) {
         appendMessage(ownerUid, chatId, groupId, "user", content);
     }
@@ -81,6 +124,49 @@ public class FirestoreInsightStorage implements InsightStorage {
     @Override
     public void appendAssistantMessage(String ownerUid, String chatId, String groupId, String content) {
         appendMessage(ownerUid, chatId, groupId, "assistant", content);
+    }
+
+    @Override
+    public AiChatSummary renameChat(String ownerUid, String chatId, String title) {
+        try {
+            DocumentSnapshot snapshot = chatDocument(chatId).get().get();
+            ensureChatOwnership(ownerUid, snapshot);
+
+            String sanitizedTitle = sanitizeTitle(title);
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("title", sanitizedTitle);
+            payload.put("titleStatus", "user_defined");
+            payload.put("isTitleUserDefined", true);
+            payload.put("updatedAt", FieldValue.serverTimestamp());
+            chatDocument(chatId).set(payload, SetOptions.merge()).get();
+            DocumentSnapshot updatedSnapshot = chatDocument(chatId).get().get();
+            if (!updatedSnapshot.exists()) {
+                return null;
+            }
+            return toChatSummary(updatedSnapshot);
+        } catch (AiInsightsAccessDeniedException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to rename Firestore-backed chat", exception);
+        }
+    }
+
+    @Override
+    public void softDeleteChat(String ownerUid, String chatId) {
+        try {
+            DocumentSnapshot snapshot = chatDocument(chatId).get().get();
+            ensureChatOwnership(ownerUid, snapshot);
+
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("isDeleted", true);
+            payload.put("hiddenAt", FieldValue.serverTimestamp());
+            payload.put("updatedAt", FieldValue.serverTimestamp());
+            chatDocument(chatId).set(payload, SetOptions.merge()).get();
+        } catch (AiInsightsAccessDeniedException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to soft delete Firestore-backed chat", exception);
+        }
     }
 
     @Override
@@ -94,6 +180,8 @@ public class FirestoreInsightStorage implements InsightStorage {
                 .set(memoryPayload(ownerUid, groupId, updated, recentEvents.size(), recentMessages.size(), now), SetOptions.merge())
                 .get();
             return updated;
+        } catch (AiInsightsAccessDeniedException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to refresh Firestore memory", exception);
         }
@@ -102,12 +190,20 @@ public class FirestoreInsightStorage implements InsightStorage {
     @Override
     public String generateTitle(String ownerUid, String chatId, String groupId) {
         try {
+            DocumentSnapshot snapshot = chatDocument(chatId).get().get();
+            ensureChatOwnership(ownerUid, snapshot);
+            if (Boolean.TRUE.equals(snapshot.getBoolean("isTitleUserDefined"))) {
+                return readString(snapshot, "title", "AI Insights Chat");
+            }
             String title = deriveTitleFromFirstUserMessage(chatId);
             Map<String, Object> titleFields = new HashMap<>();
             titleFields.put("title", title);
             titleFields.put("titleStatus", "ready");
+            titleFields.put("isTitleUserDefined", false);
             upsertChatMetadata(ownerUid, chatId, groupId, titleFields, false);
             return title;
+        } catch (AiInsightsAccessDeniedException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to generate Firestore-backed title", exception);
         }
@@ -119,6 +215,8 @@ public class FirestoreInsightStorage implements InsightStorage {
             DocumentSnapshot snapshot = chatDocument(chatId).get().get();
             ensureChatOwnership(ownerUid, snapshot);
             return snapshot.exists() ? snapshot.getString("title") : null;
+        } catch (AiInsightsAccessDeniedException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to load Firestore-backed title", exception);
         }
@@ -129,7 +227,11 @@ public class FirestoreInsightStorage implements InsightStorage {
             Map<String, Object> messageFields = new HashMap<>();
             messageFields.put("lastMessagePreview", preview(content));
             messageFields.put("lastMessageRole", role);
-            messageFields.put("titleStatus", "pending");
+            if ("user".equals(role)) {
+                messageFields.put("titleStatus", "pending");
+            }
+            messageFields.put("isDeleted", false);
+            messageFields.put("hiddenAt", null);
             upsertChatMetadata(ownerUid, chatId, groupId, messageFields, true);
 
             Map<String, Object> message = new HashMap<>();
@@ -140,6 +242,8 @@ public class FirestoreInsightStorage implements InsightStorage {
             message.put("content", content);
             message.put("createdAt", FieldValue.serverTimestamp());
             chatMessages(chatId).add(message).get();
+        } catch (AiInsightsAccessDeniedException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to append Firestore chat message", exception);
         }
@@ -245,6 +349,10 @@ public class FirestoreInsightStorage implements InsightStorage {
 
         if (!existingSnapshot.exists()) {
             payload.put("createdAt", FieldValue.serverTimestamp());
+            payload.put("isDeleted", false);
+            payload.put("title", "AI Insights Chat");
+            payload.put("titleStatus", "pending");
+            payload.put("isTitleUserDefined", false);
         }
 
         if (extraFields != null) {
@@ -264,6 +372,33 @@ public class FirestoreInsightStorage implements InsightStorage {
         Timestamp timestamp = snapshot.getTimestamp("createdAt");
         Instant createdAt = timestamp == null ? Instant.now() : timestamp.toDate().toInstant();
         return new InMemoryChatMessage(role, content, createdAt);
+    }
+
+    private AiChatMessage toApiChatMessage(DocumentSnapshot snapshot) {
+        String role = snapshot.getString("role");
+        String content = snapshot.getString("content");
+        String messageType = readString(snapshot, "messageType", "chat");
+        if (role == null || content == null) {
+            return null;
+        }
+        Timestamp timestamp = snapshot.getTimestamp("createdAt");
+        Instant createdAt = timestamp == null ? Instant.now() : timestamp.toDate().toInstant();
+        return new AiChatMessage(snapshot.getId(), role, messageType, content, createdAt);
+    }
+
+    private AiChatSummary toChatSummary(DocumentSnapshot snapshot) {
+        Timestamp lastMessageAt = snapshot.getTimestamp("lastMessageAt");
+        Instant resolvedLastMessageAt = lastMessageAt == null ? null : lastMessageAt.toDate().toInstant();
+        return new AiChatSummary(
+            snapshot.getId(),
+            readString(snapshot, "title", "AI Insights Chat"),
+            readString(snapshot, "lastMessagePreview", ""),
+            readString(snapshot, "lastMessageRole", "assistant"),
+            resolvedLastMessageAt,
+            readString(snapshot, "contextGroupId", ""),
+            readString(snapshot, "groupNameAtCreation", null),
+            Boolean.TRUE.equals(snapshot.getBoolean("isDeleted"))
+        );
     }
 
     private String formatEvent(DocumentSnapshot snapshot) {
@@ -327,6 +462,11 @@ public class FirestoreInsightStorage implements InsightStorage {
     private String preview(String content) {
         String trimmed = content == null ? "" : content.trim();
         return trimmed.length() <= 80 ? trimmed : trimmed.substring(0, 80) + "...";
+    }
+
+    private String sanitizeTitle(String title) {
+        String trimmed = title == null ? "" : title.trim();
+        return trimmed.isEmpty() ? "AI Insights Chat" : trimmed;
     }
 
     private Map<String, Object> memoryPayload(

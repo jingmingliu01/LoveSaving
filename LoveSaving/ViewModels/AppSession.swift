@@ -98,6 +98,10 @@ final class AppSession: ObservableObject {
         return invites.filter { $0.fromUid == uid }
     }
 
+    var aiInsightsService: AIInsightsServicing {
+        container.aiInsightsService
+    }
+
     func updateCrashlyticsRoute(_ route: String) {
         crashRoute = route
         syncCrashlyticsContext()

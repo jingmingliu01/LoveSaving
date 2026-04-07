@@ -31,6 +31,7 @@ final class UITestStore {
     var groups: [String: LoveGroup]
     var eventsByGroup: [String: [LoveEvent]]
     var authUser: AuthUser?
+    private var inviteObservers: [UUID: InviteObserver] = [:]
     private var groupObservers: [UUID: GroupObserver] = [:]
     private var eventObservers: [UUID: EventObserver] = [:]
 
@@ -61,6 +62,19 @@ final class UITestStore {
         groupObservers.removeValue(forKey: id)
     }
 
+    func addInviteObserver(
+        uid: String,
+        onChange: @escaping @MainActor (Result<[Invite], Error>) -> Void
+    ) -> UUID {
+        let id = UUID()
+        inviteObservers[id] = InviteObserver(uid: uid, onChange: onChange)
+        return id
+    }
+
+    func removeInviteObserver(_ id: UUID) {
+        inviteObservers.removeValue(forKey: id)
+    }
+
     func addEventObserver(
         groupId: String,
         limit: Int,
@@ -79,6 +93,15 @@ final class UITestStore {
         let currentGroup = groups[groupId]
         for observer in groupObservers.values where observer.groupId == groupId {
             observer.onChange(.success(currentGroup))
+        }
+    }
+
+    func emitInviteSnapshot(uid: String) {
+        let currentInvites = invites.values
+            .filter { $0.fromUid == uid || $0.toUid == uid }
+            .sorted { $0.createdAt > $1.createdAt }
+        for observer in inviteObservers.values where observer.uid == uid {
+            observer.onChange(.success(currentInvites))
         }
     }
 
@@ -106,6 +129,11 @@ final class UITestStore {
     private struct GroupObserver {
         let groupId: String
         let onChange: @MainActor (Result<LoveGroup?, Error>) -> Void
+    }
+
+    private struct InviteObserver {
+        let uid: String
+        let onChange: @MainActor (Result<[Invite], Error>) -> Void
     }
 
     private struct EventObserver {
@@ -292,17 +320,25 @@ final class UITestUserDataService: UserDataServicing {
         store.users.values.first { $0.email.caseInsensitiveCompare(email) == .orderedSame }
     }
 
-    func resolveUserID(identifier: String) async throws -> String? {
+    func resolveUser(identifier: String) async throws -> ResolvedUserIdentity? {
         let normalized = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return nil }
 
         if normalized.contains("@") {
-            return store.users.values.first {
+            guard let user = store.users.values.first(where: {
                 $0.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
-            }?.id
+            }) else {
+                return nil
+            }
+            return ResolvedUserIdentity(uid: user.id, displayName: user.displayName, email: user.email)
         }
 
-        return store.users[normalized] == nil ? nil : normalized
+        guard let user = store.users[normalized] else { return nil }
+        return ResolvedUserIdentity(uid: user.id, displayName: user.displayName, email: user.email)
+    }
+
+    func resolveUserID(identifier: String) async throws -> String? {
+        try await resolveUser(identifier: identifier)?.uid
     }
 
     func setCurrentGroup(uid: String, groupId: String?) async throws {
@@ -340,7 +376,9 @@ final class UITestInviteService: InviteServicing {
         toUid: String,
         expiresAt: Date?,
         fromDisplayName: String?,
-        fromEmail: String?
+        fromEmail: String?,
+        toDisplayName: String?,
+        toEmail: String?
     ) async throws -> Invite {
         let invite = Invite(
             id: "invite_\(UUID().uuidString.prefix(8))",
@@ -348,25 +386,79 @@ final class UITestInviteService: InviteServicing {
             fromDisplayName: fromDisplayName,
             fromEmail: fromEmail,
             toUid: toUid,
+            toDisplayName: toDisplayName,
+            toEmail: toEmail,
             status: .pending,
             createdAt: Date(),
             expiresAt: expiresAt
         )
         store.invites[invite.id] = invite
+        store.emitInviteSnapshot(uid: fromUid)
+        store.emitInviteSnapshot(uid: toUid)
         return invite
     }
 
-    func fetchInboundInvites(for uid: String) async throws -> [Invite] {
+    func fetchInvites(for uid: String) async throws -> [Invite] {
         store.invites.values
-            .filter { $0.toUid == uid && $0.status == .pending }
+            .filter { $0.toUid == uid || $0.fromUid == uid }
             .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func observeInvites(
+        for uid: String,
+        onChange: @escaping @MainActor (Result<[Invite], Error>) -> Void
+    ) -> any RealtimeSubscription {
+        let id = store.addInviteObserver(uid: uid, onChange: onChange)
+        store.emitInviteSnapshot(uid: uid)
+        return UITestRealtimeSubscription { [weak store] in
+            Task { @MainActor in
+                store?.removeInviteObserver(id)
+            }
+        }
     }
 
     func respondInvite(inviteId: String, status: InviteStatus, respondedAt: Date) async throws {
         guard var invite = store.invites[inviteId] else { return }
+        guard invite.status == .pending else {
+            throw AppError.invalidInviteState
+        }
         invite.status = status
         invite.respondedAt = respondedAt
         store.invites[inviteId] = invite
+
+        if status == .accepted {
+            let group = LoveGroup(
+                id: "group_\(UUID().uuidString.prefix(8))",
+                groupName: "LoveSaving Group",
+                memberIds: [invite.fromUid, invite.toUid],
+                createdBy: invite.fromUid,
+                status: .active,
+                loveBalance: 0,
+                lastEventAt: respondedAt,
+                createdAt: respondedAt,
+                updatedAt: respondedAt
+            )
+            store.groups[group.id] = group
+            store.eventsByGroup[group.id] = []
+
+            if var fromUser = store.users[invite.fromUid] {
+                fromUser.currentGroupId = group.id
+                fromUser.updatedAt = respondedAt
+                store.users[invite.fromUid] = fromUser
+            }
+
+            if var toUser = store.users[invite.toUid] {
+                toUser.currentGroupId = group.id
+                toUser.updatedAt = respondedAt
+                store.users[invite.toUid] = toUser
+            }
+
+            store.emitGroupSnapshot(groupId: group.id)
+            store.emitEventsSnapshot(groupId: group.id)
+        }
+
+        store.emitInviteSnapshot(uid: invite.fromUid)
+        store.emitInviteSnapshot(uid: invite.toUid)
     }
 }
 

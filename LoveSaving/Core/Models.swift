@@ -57,6 +57,8 @@ public struct Invite: Identifiable, Codable, Sendable, Equatable {
     public var fromDisplayName: String?
     public var fromEmail: String?
     public var toUid: String
+    public var toDisplayName: String?
+    public var toEmail: String?
     public var status: InviteStatus
     public var createdAt: Date
     public var respondedAt: Date?
@@ -68,6 +70,8 @@ public struct Invite: Identifiable, Codable, Sendable, Equatable {
         fromDisplayName: String? = nil,
         fromEmail: String? = nil,
         toUid: String,
+        toDisplayName: String? = nil,
+        toEmail: String? = nil,
         status: InviteStatus,
         createdAt: Date,
         respondedAt: Date? = nil,
@@ -78,6 +82,8 @@ public struct Invite: Identifiable, Codable, Sendable, Equatable {
         self.fromDisplayName = fromDisplayName
         self.fromEmail = fromEmail
         self.toUid = toUid
+        self.toDisplayName = toDisplayName
+        self.toEmail = toEmail
         self.status = status
         self.createdAt = createdAt
         self.respondedAt = respondedAt

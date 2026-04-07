@@ -630,6 +630,7 @@ final class AppSession: ObservableObject {
     ) async {
         do {
             invites = try await fetchResolvedInvites(for: uid)
+            scheduleAcceptedInviteRefreshIfNeeded(for: uid, invites: invites)
         } catch {
             invites = []
             handleError(error, source: source, presentToUser: presentToUser)
@@ -914,12 +915,51 @@ final class AppSession: ObservableObject {
                             invites = resolvedInvites
                             syncCrashlyticsContext()
                         }
+                        scheduleAcceptedInviteRefreshIfNeeded(for: uid, invites: resolvedInvites)
                     } catch {
                         handleError(error, source: "realtime.invites", presentToUser: false)
                     }
                 }
             case .failure(let error):
                 self.handleError(error, source: "realtime.invites", presentToUser: false)
+            }
+        }
+    }
+
+    private func scheduleAcceptedInviteRefreshIfNeeded(for uid: String, invites: [Invite]) {
+        guard authUser?.uid == uid else { return }
+        guard group == nil else { return }
+        guard profile?.currentGroupId == nil else { return }
+        guard invites.contains(where: { invite in
+            invite.status == .accepted && (invite.fromUid == uid || invite.toUid == uid)
+        }) else {
+            return
+        }
+
+        inviteRealtimeRefreshTask?.cancel()
+        inviteRealtimeRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let retryDelays: [UInt64] = [
+                150_000_000,
+                400_000_000,
+                900_000_000
+            ]
+
+            for delay in retryDelays {
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled else { return }
+                guard let currentUser = authUser, currentUser.uid == uid else { return }
+                guard group == nil, profile?.currentGroupId == nil else { return }
+
+                do {
+                    try await refreshForAuthUser(currentUser)
+                } catch {
+                    continue
+                }
+
+                if group != nil || profile?.currentGroupId != nil {
+                    return
+                }
             }
         }
     }

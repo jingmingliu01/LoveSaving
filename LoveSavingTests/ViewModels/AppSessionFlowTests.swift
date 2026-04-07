@@ -164,6 +164,59 @@ final class AppSessionFlowTests: XCTestCase {
         }
     }
 
+    func testRealtimeAcceptedInviteRefreshesSenderIntoLinkedState() async {
+        let store = UITestStore.makeSeeded(scenario: .unlinked)
+        let outgoingInvite = Invite(
+            id: "invite_outgoing_pending_realtime",
+            fromUid: "owner",
+            fromDisplayName: "Owner",
+            fromEmail: "owner@example.com",
+            toUid: "partner",
+            toDisplayName: "Partner",
+            toEmail: "partner@example.com",
+            status: .pending,
+            createdAt: Date().addingTimeInterval(-60),
+            expiresAt: Date().addingTimeInterval(7 * 24 * 3600)
+        )
+        store.invites[outgoingInvite.id] = outgoingInvite
+
+        let session = makeSession(store: store, scenario: .unlinked).session
+
+        await waitUntil("auth observer loads unlinked sender state") {
+            session.isSignedIn && session.outgoingInvites.contains(where: { $0.id == outgoingInvite.id })
+        }
+
+        let linkedGroup = LoveGroup(
+            id: "group_remote_accept",
+            groupName: "LoveSaving Group",
+            memberIds: ["owner", "partner"],
+            createdBy: "owner",
+            status: .active,
+            loveBalance: 0,
+            lastEventAt: Date(),
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        store.groups[linkedGroup.id] = linkedGroup
+        store.eventsByGroup[linkedGroup.id] = []
+
+        if var owner = store.users["owner"] {
+            owner.currentGroupId = linkedGroup.id
+            owner.updatedAt = Date()
+            store.users["owner"] = owner
+        }
+
+        var acceptedInvite = outgoingInvite
+        acceptedInvite.status = .accepted
+        acceptedInvite.respondedAt = Date()
+        store.invites[acceptedInvite.id] = acceptedInvite
+        store.emitInviteSnapshot(uid: "owner")
+
+        await waitUntil("sender transitions into linked state after remote acceptance") {
+            session.group?.id == linkedGroup.id && session.isLinked
+        }
+    }
+
     func testSubmitTapBurstWithImageAddsEventMedia() async {
         let session = makeSession(scenario: .linked).session
         await waitUntil("auth observer loads linked group") {

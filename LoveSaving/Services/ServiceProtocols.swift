@@ -135,6 +135,41 @@ enum AppError: LocalizedError {
     }
 }
 
+enum NotificationAuthorizationState: String, Equatable, Sendable {
+    case notDetermined
+    case denied
+    case authorized
+
+    var isAuthorized: Bool {
+        self == .authorized
+    }
+
+    var displayTitle: String {
+        switch self {
+        case .notDetermined:
+            return "Not Enabled"
+        case .denied:
+            return "Denied"
+        case .authorized:
+            return "Enabled"
+        }
+    }
+}
+
+struct NotificationSettingsState: Equatable, Sendable {
+    var authorizationStatus: NotificationAuthorizationState
+    var dailyReminderEnabled: Bool
+    var reminderHour: Int
+    var reminderMinute: Int
+
+    static let `default` = NotificationSettingsState(
+        authorizationStatus: .notDetermined,
+        dailyReminderEnabled: true,
+        reminderHour: 20,
+        reminderMinute: 0
+    )
+}
+
 @MainActor
 protocol RealtimeSubscription: AnyObject {
     func cancel()
@@ -216,9 +251,22 @@ protocol MediaServicing {
 
 @MainActor
 protocol MessagingServicing {
-    func requestNotificationAuthorization() async throws
-    func scheduleDailyReflectionReminder() async throws
+    func fetchNotificationSettings() async -> NotificationSettingsState
+    func requestNotificationAuthorization() async throws -> NotificationSettingsState
+    func updateDailyReflectionReminder(
+        enabled: Bool,
+        hour: Int,
+        minute: Int
+    ) async throws -> NotificationSettingsState
+    func syncNotificationSettings() async throws -> NotificationSettingsState
+    func fetchCurrentToken() async -> String?
     var tokenStream: AsyncStream<String> { get }
+}
+
+extension MessagingServicing {
+    func fetchCurrentToken() async -> String? {
+        nil
+    }
 }
 
 protocol AIInsightsAvailabilityServicing {

@@ -1,7 +1,12 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct ProfileView: View {
     @EnvironmentObject private var session: AppSession
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var newDisplayName = ""
     @State private var newPassword = ""
@@ -48,6 +53,74 @@ struct ProfileView: View {
                     .disabled(newPassword.count < 6)
                 }
 
+                Section("Notifications") {
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        Text(session.notificationSettings.authorizationStatus.displayTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(notificationStatusTint)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(notificationStatusTint.opacity(0.12), in: Capsule())
+                    }
+
+                    switch session.notificationSettings.authorizationStatus {
+                    case .notDetermined:
+                        Text("Enable notifications to get daily reminders to log meaningful moments.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Button("Enable Notifications") {
+                            Task {
+                                await session.requestNotifications()
+                            }
+                        }
+                    case .denied:
+                        Text("Notifications are turned off in iPhone Settings. Open Settings to allow alerts for LoveSaving.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Button("Open iPhone Settings") {
+                            #if canImport(UIKit)
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                openURL(url)
+                            }
+                            #endif
+                        }
+                    case .authorized:
+                        Toggle(
+                            "Daily Reflection Reminder",
+                            isOn: Binding(
+                                get: { session.notificationSettings.dailyReminderEnabled },
+                                set: { newValue in
+                                    Task {
+                                        await session.setDailyReminderEnabled(newValue)
+                                    }
+                                }
+                            )
+                        )
+
+                        DatePicker(
+                            "Reminder Time",
+                            selection: Binding(
+                                get: { reminderDate },
+                                set: { newValue in
+                                    Task {
+                                        await session.setDailyReminderTime(newValue)
+                                    }
+                                }
+                            ),
+                            displayedComponents: .hourAndMinute
+                        )
+                        .disabled(!session.notificationSettings.dailyReminderEnabled)
+
+                        Text("Get a daily reminder to reflect and add a new journey moment.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("Group") {
                     if let group = session.group {
                         Text("Group: \(group.groupName)")
@@ -87,6 +160,16 @@ struct ProfileView: View {
             .navigationTitle("Profile")
             .refreshable {
                 await session.refreshProfile()
+                await session.refreshNotificationSettings()
+            }
+            .task {
+                await session.refreshNotificationSettings()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                Task {
+                    await session.refreshNotificationSettings()
+                }
             }
             .safeAreaInset(edge: .top) {
                 RefreshStatusView(state: session.refreshState(for: .profile))
@@ -100,5 +183,33 @@ struct ProfileView: View {
                 Text("This is a manual Crashlytics verification action for debug builds.")
             }
         }
+    }
+
+    private var notificationStatusTint: Color {
+        switch session.notificationSettings.authorizationStatus {
+        case .authorized:
+            return .green
+        case .denied:
+            return .red
+        case .notDetermined:
+            return .orange
+        }
+    }
+
+    private var reminderDate: Date {
+        let now = Date()
+        let calendar = Calendar.current
+        let baseComponents = calendar.dateComponents([.year, .month, .day], from: now)
+        let reminderComponents = DateComponents(
+            hour: session.notificationSettings.reminderHour,
+            minute: session.notificationSettings.reminderMinute
+        )
+        return calendar.date(from: DateComponents(
+            year: baseComponents.year,
+            month: baseComponents.month,
+            day: baseComponents.day,
+            hour: reminderComponents.hour,
+            minute: reminderComponents.minute
+        )) ?? now
     }
 }

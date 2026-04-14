@@ -27,6 +27,7 @@ final class AppSession: ObservableObject {
     @Published private(set) var group: LoveGroup?
     @Published private(set) var invites: [Invite] = []
     @Published private(set) var events: [LoveEvent] = []
+    @Published private(set) var notificationSettings: NotificationSettingsState = .default
     @Published private(set) var aiInsightsAvailability: AIInsightsAvailability = .checking
     @Published private(set) var hasResolvedInitialAuthState = false
 
@@ -148,6 +149,7 @@ final class AppSession: ObservableObject {
         group = nil
         invites = []
         events = []
+        notificationSettings = .default
         globalErrorMessage = nil
         syncCrashlyticsContext()
     }
@@ -528,14 +530,72 @@ final class AppSession: ObservableObject {
     func requestNotifications(suppressErrors: Bool = false) async {
         do {
             applyOperationContext(.source("notifications.request"))
-            try await container.messagingService.requestNotificationAuthorization()
-            try await container.messagingService.scheduleDailyReflectionReminder()
+            notificationSettings = try await container.messagingService.requestNotificationAuthorization()
+            if notificationSettings.authorizationStatus.isAuthorized {
+                notificationSettings = try await container.messagingService.updateDailyReflectionReminder(
+                    enabled: notificationSettings.dailyReminderEnabled,
+                    hour: notificationSettings.reminderHour,
+                    minute: notificationSettings.reminderMinute
+                )
+            }
+            syncCrashlyticsContext()
         } catch {
             handleError(
                 error,
                 source: "notifications.request",
                 presentToUser: !suppressErrors
             )
+        }
+    }
+
+    func refreshNotificationSettings() async {
+        notificationSettings = await container.messagingService.fetchNotificationSettings()
+        syncCrashlyticsContext()
+    }
+
+    func syncNotificationSettingsOnLaunch(suppressErrors: Bool = false) async {
+        do {
+            applyOperationContext(.source("notifications.sync"))
+            notificationSettings = try await container.messagingService.syncNotificationSettings()
+            syncCrashlyticsContext()
+        } catch {
+            handleError(
+                error,
+                source: "notifications.sync",
+                presentToUser: !suppressErrors
+            )
+        }
+    }
+
+    func setDailyReminderEnabled(_ enabled: Bool) async {
+        do {
+            applyOperationContext(.source("notifications.reminder.toggle"))
+            notificationSettings = try await container.messagingService.updateDailyReflectionReminder(
+                enabled: enabled,
+                hour: notificationSettings.reminderHour,
+                minute: notificationSettings.reminderMinute
+            )
+            syncCrashlyticsContext()
+        } catch {
+            handleError(error, source: "notifications.reminder.toggle", presentToUser: true)
+        }
+    }
+
+    func setDailyReminderTime(_ date: Date) async {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let hour = components.hour ?? notificationSettings.reminderHour
+        let minute = components.minute ?? notificationSettings.reminderMinute
+
+        do {
+            applyOperationContext(.source("notifications.reminder.time"))
+            notificationSettings = try await container.messagingService.updateDailyReflectionReminder(
+                enabled: notificationSettings.dailyReminderEnabled,
+                hour: hour,
+                minute: minute
+            )
+            syncCrashlyticsContext()
+        } catch {
+            handleError(error, source: "notifications.reminder.time", presentToUser: true)
         }
     }
 
@@ -598,6 +658,7 @@ final class AppSession: ObservableObject {
 
         let profile = try await ensureProfileExists(for: user)
         self.profile = profile
+        await syncCurrentMessagingTokenIfAvailable(for: user.uid)
 
         if let currentGroupId = profile.currentGroupId,
            let group = try await container.groupService.fetchGroup(groupId: currentGroupId),
@@ -621,6 +682,19 @@ final class AppSession: ObservableObject {
         }
 
         syncCrashlyticsContext()
+    }
+
+    private func syncCurrentMessagingTokenIfAvailable(for uid: String) async {
+        guard let token = await container.messagingService.fetchCurrentToken(),
+              !token.isEmpty else {
+            return
+        }
+
+        do {
+            try await container.userDataService.updateFcmToken(uid: uid, token: token)
+        } catch {
+            handleError(error, source: "messaging.tokenSync", presentToUser: false)
+        }
     }
 
     private func refreshUserInvites(

@@ -640,12 +640,49 @@ final class UITestMediaService: MediaServicing {
 
 @MainActor
 final class UITestMessagingService: MessagingServicing {
+    private let currentToken: String?
+    private var settings = NotificationSettingsState(
+        authorizationStatus: .authorized,
+        dailyReminderEnabled: true,
+        reminderHour: 20,
+        reminderMinute: 0
+    )
+
+    init(currentToken: String? = nil) {
+        self.currentToken = currentToken
+    }
+
     var tokenStream: AsyncStream<String> {
         AsyncStream { _ in }
     }
 
-    func requestNotificationAuthorization() async throws {}
-    func scheduleDailyReflectionReminder() async throws {}
+    func fetchCurrentToken() async -> String? {
+        currentToken
+    }
+
+    func fetchNotificationSettings() async -> NotificationSettingsState {
+        settings
+    }
+
+    func requestNotificationAuthorization() async throws -> NotificationSettingsState {
+        settings.authorizationStatus = .authorized
+        return settings
+    }
+
+    func updateDailyReflectionReminder(
+        enabled: Bool,
+        hour: Int,
+        minute: Int
+    ) async throws -> NotificationSettingsState {
+        settings.dailyReminderEnabled = enabled
+        settings.reminderHour = hour
+        settings.reminderMinute = minute
+        return settings
+    }
+
+    func syncNotificationSettings() async throws -> NotificationSettingsState {
+        settings
+    }
 }
 
 @MainActor

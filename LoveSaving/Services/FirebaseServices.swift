@@ -876,10 +876,19 @@ final class FirebaseStorageMediaService: MediaServicing {
 
 @MainActor
 final class FirebaseMessagingService: NSObject, MessagingServicing {
+    private enum DefaultsKeys {
+        static let reminderEnabled = "notifications.dailyReflection.enabled"
+        static let reminderHour = "notifications.dailyReflection.hour"
+        static let reminderMinute = "notifications.dailyReflection.minute"
+    }
+
+    private let reminderIdentifier = "daily_reflection"
     private let stream: AsyncStream<String>
     private let continuation: AsyncStream<String>.Continuation
+    private let defaults: UserDefaults
 
-    override init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         var resolvedContinuation: AsyncStream<String>.Continuation?
         stream = AsyncStream { continuation in
             resolvedContinuation = continuation
@@ -894,39 +903,114 @@ final class FirebaseMessagingService: NSObject, MessagingServicing {
         stream
     }
 
-    func requestNotificationAuthorization() async throws {
+    func fetchCurrentToken() async -> String? {
+        await withCheckedContinuation { continuation in
+            Messaging.messaging().token { token, _ in
+                continuation.resume(returning: token)
+            }
+        }
+    }
+
+    func fetchNotificationSettings() async -> NotificationSettingsState {
+        let authorizationStatus = await currentAuthorizationStatus()
+        let storedSettings = storedReminderSettings()
+        return NotificationSettingsState(
+            authorizationStatus: authorizationStatus,
+            dailyReminderEnabled: storedSettings.enabled,
+            reminderHour: storedSettings.hour,
+            reminderMinute: storedSettings.minute
+        )
+    }
+
+    func requestNotificationAuthorization() async throws -> NotificationSettingsState {
         #if canImport(UIKit)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, error in
+        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
-                    continuation.resume(returning: ())
+                    continuation.resume(returning: granted)
                 }
             }
         }
+        #endif
 
+        let settings = await fetchNotificationSettings()
+        await syncRemoteNotificationRegistration(using: settings)
+        try await applyReminderSchedule(using: settings)
+        return settings
+    }
+
+    func updateDailyReflectionReminder(
+        enabled: Bool,
+        hour: Int,
+        minute: Int
+    ) async throws -> NotificationSettingsState {
+        defaults.set(enabled, forKey: DefaultsKeys.reminderEnabled)
+        defaults.set(hour, forKey: DefaultsKeys.reminderHour)
+        defaults.set(minute, forKey: DefaultsKeys.reminderMinute)
+
+        let settings = await fetchNotificationSettings()
+        try await applyReminderSchedule(using: settings)
+        return settings
+    }
+
+    func syncNotificationSettings() async throws -> NotificationSettingsState {
+        let settings = await fetchNotificationSettings()
+        await syncRemoteNotificationRegistration(using: settings)
+        try await applyReminderSchedule(using: settings)
+        return settings
+    }
+
+    private func syncRemoteNotificationRegistration(using settings: NotificationSettingsState) async {
+        #if canImport(UIKit)
+        guard settings.authorizationStatus.isAuthorized else { return }
         await MainActor.run {
             UIApplication.shared.registerForRemoteNotifications()
         }
         #endif
     }
 
-    func scheduleDailyReflectionReminder() async throws {
+    private func applyReminderSchedule(using settings: NotificationSettingsState) async throws {
         #if canImport(UIKit)
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [reminderIdentifier])
+
+        guard settings.authorizationStatus.isAuthorized, settings.dailyReminderEnabled else {
+            return
+        }
+
         let content = UNMutableNotificationContent()
         content.title = "LoveSaving Reminder"
         content.body = "Take a moment to reflect and log a meaningful moment today."
         content.sound = .default
 
         var components = DateComponents()
-        components.hour = 20
-        components.minute = 0
+        components.hour = settings.reminderHour
+        components.minute = settings.reminderMinute
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-        let request = UNNotificationRequest(identifier: "daily_reflection", content: content, trigger: trigger)
+        let request = UNNotificationRequest(identifier: reminderIdentifier, content: content, trigger: trigger)
         try await UNUserNotificationCenter.current().add(request)
         #endif
+    }
+
+    private func currentAuthorizationStatus() async -> NotificationAuthorizationState {
+        #if canImport(UIKit)
+        return await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                continuation.resume(returning: NotificationAuthorizationState(settings.authorizationStatus))
+            }
+        }
+        #else
+        return .notDetermined
+        #endif
+    }
+
+    private func storedReminderSettings() -> (enabled: Bool, hour: Int, minute: Int) {
+        let enabled = defaults.object(forKey: DefaultsKeys.reminderEnabled) as? Bool ?? true
+        let hour = defaults.object(forKey: DefaultsKeys.reminderHour) as? Int ?? 20
+        let minute = defaults.object(forKey: DefaultsKeys.reminderMinute) as? Int ?? 0
+        return (enabled, hour, minute)
     }
 }
 
@@ -936,6 +1020,23 @@ extension FirebaseMessagingService: MessagingDelegate {
         continuation.yield(fcmToken)
     }
 }
+
+#if canImport(UIKit)
+private extension NotificationAuthorizationState {
+    init(_ status: UNAuthorizationStatus) {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            self = .authorized
+        case .denied:
+            self = .denied
+        case .notDetermined:
+            self = .notDetermined
+        @unknown default:
+            self = .notDetermined
+        }
+    }
+}
+#endif
 
 private func firestoreNullable(_ value: String?) -> Any {
     value ?? NSNull()

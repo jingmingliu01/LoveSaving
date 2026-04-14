@@ -1,8 +1,175 @@
 const admin = require("firebase-admin");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const logger = require("firebase-functions/logger");
 
 admin.initializeApp();
+const firestore = admin.firestore();
+
+function normalizedString(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function truncateText(value, maxLength = 140) {
+  const normalized = normalizedString(value);
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function pushData(payload) {
+  return Object.entries(payload).reduce((result, [key, value]) => {
+    if (value === undefined || value === null) {
+      return result;
+    }
+    result[key] = String(value);
+    return result;
+  }, {});
+}
+
+async function userProfileFor(uid) {
+  if (!normalizedString(uid)) {
+    return null;
+  }
+
+  const snapshot = await firestore.collection("users").doc(uid).get();
+  return snapshot.exists ? snapshot.data() : null;
+}
+
+async function clearInvalidFcmToken(uid) {
+  await firestore.collection("users").doc(uid).set({
+    fcmToken: null,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+}
+
+async function sendPushToUser({
+  uid,
+  title,
+  body,
+  data,
+  type,
+}) {
+  const targetUid = normalizedString(uid);
+  if (!targetUid) {
+    return false;
+  }
+
+  const profile = await userProfileFor(targetUid);
+  const token = normalizedString(profile && profile.fcmToken);
+
+  if (!token) {
+    logger.info("push_skipped_missing_token", {
+      op: "push_send",
+      type,
+      target_uid: targetUid,
+    });
+    return false;
+  }
+
+  try {
+    await admin.messaging().send({
+      token,
+      notification: {
+        title,
+        body,
+      },
+      data: pushData(data),
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+          },
+        },
+      },
+    });
+
+    logger.info("push_sent", {
+      op: "push_send",
+      type,
+      target_uid: targetUid,
+    });
+    return true;
+  } catch (error) {
+    const errorCode = error && error.code ? error.code : "unknown";
+
+    if (["messaging/invalid-registration-token", "messaging/registration-token-not-registered"].includes(errorCode)) {
+      await clearInvalidFcmToken(targetUid);
+    }
+
+    logger.error("push_send_failed", {
+      op: "push_send",
+      type,
+      target_uid: targetUid,
+      error_code: errorCode,
+      error_message: error && error.message ? error.message : "unknown",
+    });
+    return false;
+  }
+}
+
+function inviteSenderName(invite) {
+  return normalizedString(invite.fromDisplayName)
+    || normalizedString(invite.fromEmail)
+    || "Someone";
+}
+
+function inviteRecipientName(invite) {
+  return normalizedString(invite.toDisplayName)
+    || normalizedString(invite.toEmail)
+    || "your partner";
+}
+
+function inviteStatusBody(invite) {
+  switch (invite.status) {
+    case "accepted":
+      return `${inviteRecipientName(invite)} accepted your invite.`;
+    case "rejected":
+      return `${inviteRecipientName(invite)} declined your invite.`;
+    case "expired":
+      return `Your invite to ${inviteRecipientName(invite)} expired.`;
+    default:
+      return "There is an update to your invite.";
+  }
+}
+
+function eventActorName(profile) {
+  return normalizedString(profile && profile.displayName)
+    || normalizedString(profile && profile.email)
+    || "Your partner";
+}
+
+function eventTitle(eventData, profile) {
+  const actor = eventActorName(profile);
+  if (eventData.type === "withdraw") {
+    return `${actor} shared a reflection`;
+  }
+  return `${actor} added a moment`;
+}
+
+function eventBody(eventData) {
+  const note = truncateText(eventData.note);
+  if (note) {
+    return note;
+  }
+
+  if (eventData.type === "withdraw") {
+    return "Open LoveSaving to see the latest reflection in your shared journey.";
+  }
+
+  return "Open LoveSaving to see the newest moment in your shared journey.";
+}
 
 exports.resolveUserIdentifier = onCall(async (request) => {
   const startedAt = Date.now();
@@ -244,4 +411,83 @@ exports.respondToInvite = onCall(async (request) => {
     });
     throw new HttpsError("internal", "Failed to update invite.");
   }
+});
+
+exports.notifyInviteRecipient = onDocumentCreated("invites/{inviteId}", async (event) => {
+  const invite = event.data ? event.data.data() : null;
+  if (!invite) {
+    return;
+  }
+
+  await sendPushToUser({
+    uid: invite.toUid,
+    title: "New LoveSaving invite",
+    body: `${inviteSenderName(invite)} invited you to connect on LoveSaving.`,
+    data: {
+      type: "invite_created",
+      inviteId: event.params.inviteId,
+      fromUid: invite.fromUid,
+    },
+    type: "invite_created",
+  });
+});
+
+exports.notifyInviteStatusChanged = onDocumentUpdated("invites/{inviteId}", async (event) => {
+  const before = event.data ? event.data.before.data() : null;
+  const after = event.data ? event.data.after.data() : null;
+
+  if (!before || !after || before.status === after.status || after.status === "pending") {
+    return;
+  }
+
+  await sendPushToUser({
+    uid: after.fromUid,
+    title: "Invite updated",
+    body: inviteStatusBody(after),
+    data: {
+      type: "invite_status_changed",
+      inviteId: event.params.inviteId,
+      status: after.status,
+      toUid: after.toUid,
+    },
+    type: "invite_status_changed",
+  });
+});
+
+exports.notifyGroupMembersOfNewEvent = onDocumentCreated("groups/{groupId}/events/{eventId}", async (event) => {
+  const eventData = event.data ? event.data.data() : null;
+  if (!eventData) {
+    return;
+  }
+
+  const groupSnapshot = await firestore.collection("groups").doc(event.params.groupId).get();
+  if (!groupSnapshot.exists) {
+    return;
+  }
+
+  const group = groupSnapshot.data();
+  const memberIds = Array.isArray(group && group.memberIds) ? group.memberIds : [];
+  const recipients = memberIds.filter((uid) => uid && uid !== eventData.createdBy);
+
+  if (recipients.length === 0) {
+    return;
+  }
+
+  const actorProfile = await userProfileFor(eventData.createdBy);
+  const title = eventTitle(eventData, actorProfile);
+  const body = eventBody(eventData);
+
+  await Promise.all(recipients.map((uid) => sendPushToUser({
+    uid,
+    title,
+    body,
+    data: {
+      type: "group_event_created",
+      groupId: event.params.groupId,
+      eventId: event.params.eventId,
+      eventType: eventData.type || "unknown",
+      createdBy: eventData.createdBy || "",
+    },
+    type: "group_event_created",
+  })));
 });

@@ -30,6 +30,20 @@ private final class FirestoreRealtimeSubscription: RealtimeSubscription {
 }
 
 @MainActor
+private final class CompositeRealtimeSubscription: RealtimeSubscription {
+    private var subscriptions: [any RealtimeSubscription]
+
+    init(subscriptions: [any RealtimeSubscription]) {
+        self.subscriptions = subscriptions
+    }
+
+    func cancel() {
+        subscriptions.forEach { $0.cancel() }
+        subscriptions.removeAll()
+    }
+}
+
+@MainActor
 final class FirebaseAuthService: AuthServicing {
     private let auth: Auth
 
@@ -214,7 +228,7 @@ final class FirebaseUserDataService: UserDataServicing {
 
     func findUser(email: String) async throws -> UserProfile? {
         try await withPerformanceTrace("user_find_by_identifier") {
-            guard let resolved = try await resolveUserByIdentifier(email) else {
+            guard let resolved = try await resolveUser(identifier: email) else {
                 return nil
             }
             let now = Date()
@@ -229,8 +243,12 @@ final class FirebaseUserDataService: UserDataServicing {
         }
     }
 
+    func resolveUser(identifier: String) async throws -> ResolvedUserIdentity? {
+        try await resolveUserByIdentifier(identifier)
+    }
+
     func resolveUserID(identifier: String) async throws -> String? {
-        try await resolveUserByIdentifier(identifier)?.uid
+        try await resolveUser(identifier: identifier)?.uid
     }
 
     func setCurrentGroup(uid: String, groupId: String?) async throws {
@@ -254,7 +272,7 @@ final class FirebaseUserDataService: UserDataServicing {
         ], merge: true)
     }
 
-    private func resolveUserByIdentifier(_ identifier: String) async throws -> ResolvedUser? {
+    private func resolveUserByIdentifier(_ identifier: String) async throws -> ResolvedUserIdentity? {
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return nil
@@ -267,7 +285,7 @@ final class FirebaseUserDataService: UserDataServicing {
                   let uid = payload["uid"] as? String else {
                 return nil
             }
-            return ResolvedUser(
+            return ResolvedUserIdentity(
                 uid: uid,
                 displayName: payload["displayName"] as? String,
                 email: payload["email"] as? String
@@ -283,11 +301,6 @@ final class FirebaseUserDataService: UserDataServicing {
         }
     }
 
-    private struct ResolvedUser {
-        let uid: String
-        let displayName: String?
-        let email: String?
-    }
 }
 
 @MainActor
@@ -305,7 +318,9 @@ final class FirebaseInviteService: InviteServicing {
         toUid: String,
         expiresAt: Date?,
         fromDisplayName: String?,
-        fromEmail: String?
+        fromEmail: String?,
+        toDisplayName: String?,
+        toEmail: String?
     ) async throws -> Invite {
         guard let authUID = auth.currentUser?.uid, authUID == fromUid else {
             throw AppError.missingAuthUser
@@ -319,6 +334,8 @@ final class FirebaseInviteService: InviteServicing {
             fromDisplayName: fromDisplayName,
             fromEmail: fromEmail,
             toUid: toUid,
+            toDisplayName: toDisplayName,
+            toEmail: toEmail,
             status: .pending,
             createdAt: createdAt,
             expiresAt: expiresAt
@@ -329,6 +346,8 @@ final class FirebaseInviteService: InviteServicing {
             "fromDisplayName": firestoreNullable(invite.fromDisplayName),
             "fromEmail": firestoreNullable(invite.fromEmail),
             "toUid": invite.toUid,
+            "toDisplayName": firestoreNullable(invite.toDisplayName),
+            "toEmail": firestoreNullable(invite.toEmail),
             "status": invite.status.rawValue,
             "createdAt": FieldValue.serverTimestamp(),
             "expiresAt": (invite.expiresAt.map(Timestamp.init(date:)) ?? NSNull()) as Any
@@ -337,22 +356,104 @@ final class FirebaseInviteService: InviteServicing {
         return invite
     }
 
-    func fetchInboundInvites(for uid: String) async throws -> [Invite] {
-        let snapshot = try await db.collection("invites")
+    func fetchInvites(for uid: String) async throws -> [Invite] {
+        async let inboundSnapshot = db.collection("invites")
             .whereField("toUid", isEqualTo: uid)
-            .whereField("status", isEqualTo: InviteStatus.pending.rawValue)
-            .order(by: "createdAt", descending: true)
+            .getDocuments()
+        async let outboundSnapshot = db.collection("invites")
+            .whereField("fromUid", isEqualTo: uid)
             .getDocuments()
 
-        return snapshot.documents.compactMap { $0.toInvite() }
+        let inbound = try await inboundSnapshot
+        let outbound = try await outboundSnapshot
+        let documents = inbound.documents + outbound.documents
+        var invitesByID: [String: Invite] = [:]
+
+        for document in documents {
+            guard let invite = document.toInvite() else { continue }
+            invitesByID[invite.id] = invite
+        }
+
+        return invitesByID.values.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func observeInvites(
+        for uid: String,
+        onChange: @escaping @MainActor (Result<[Invite], Error>) -> Void
+    ) -> any RealtimeSubscription {
+        var inboundInvites: [Invite] = []
+        var outboundInvites: [Invite] = []
+
+        @MainActor
+        func publishCombined() {
+            let combined = (inboundInvites + outboundInvites)
+                .reduce(into: [String: Invite]()) { result, invite in
+                    result[invite.id] = invite
+                }
+                .values
+                .sorted { $0.createdAt > $1.createdAt }
+            onChange(.success(combined))
+        }
+
+        let inboundListener = db.collection("invites")
+            .whereField("toUid", isEqualTo: uid)
+            .addSnapshotListener { snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        onChange(.failure(error))
+                        return
+                    }
+
+                    inboundInvites = snapshot?.documents.compactMap { $0.toInvite() } ?? []
+                    publishCombined()
+                }
+            }
+
+        let outboundListener = db.collection("invites")
+            .whereField("fromUid", isEqualTo: uid)
+            .addSnapshotListener { snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        onChange(.failure(error))
+                        return
+                    }
+
+                    outboundInvites = snapshot?.documents.compactMap { $0.toInvite() } ?? []
+                    publishCombined()
+                }
+            }
+
+        return CompositeRealtimeSubscription(
+            subscriptions: [
+                FirestoreRealtimeSubscription(listener: inboundListener),
+                FirestoreRealtimeSubscription(listener: outboundListener)
+            ]
+        )
     }
 
     func respondInvite(inviteId: String, status: InviteStatus, respondedAt: Date) async throws {
         _ = respondedAt
-        try await db.collection("invites").document(inviteId).updateData([
-            "status": status.rawValue,
-            "respondedAt": FieldValue.serverTimestamp()
-        ])
+        let callable = Functions.functions().httpsCallable("respondToInvite")
+        do {
+            _ = try await callable.call([
+                "inviteId": inviteId,
+                "status": status.rawValue
+            ])
+        } catch {
+            if let nsError = error as NSError?,
+               nsError.domain == FunctionsErrorDomain,
+               let code = FunctionsErrorCode(rawValue: nsError.code) {
+                switch code {
+                case .unauthenticated:
+                    throw AppError.missingAuthUser
+                case .notFound, .failedPrecondition, .permissionDenied:
+                    throw AppError.invalidInviteState
+                default:
+                    break
+                }
+            }
+            throw error
+        }
     }
 }
 
@@ -775,10 +876,19 @@ final class FirebaseStorageMediaService: MediaServicing {
 
 @MainActor
 final class FirebaseMessagingService: NSObject, MessagingServicing {
+    private enum DefaultsKeys {
+        static let reminderEnabled = "notifications.dailyReflection.enabled"
+        static let reminderHour = "notifications.dailyReflection.hour"
+        static let reminderMinute = "notifications.dailyReflection.minute"
+    }
+
+    private let reminderIdentifier = "daily_reflection"
     private let stream: AsyncStream<String>
     private let continuation: AsyncStream<String>.Continuation
+    private let defaults: UserDefaults
 
-    override init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         var resolvedContinuation: AsyncStream<String>.Continuation?
         stream = AsyncStream { continuation in
             resolvedContinuation = continuation
@@ -793,39 +903,114 @@ final class FirebaseMessagingService: NSObject, MessagingServicing {
         stream
     }
 
-    func requestNotificationAuthorization() async throws {
+    func fetchCurrentToken() async -> String? {
+        await withCheckedContinuation { continuation in
+            Messaging.messaging().token { token, _ in
+                continuation.resume(returning: token)
+            }
+        }
+    }
+
+    func fetchNotificationSettings() async -> NotificationSettingsState {
+        let authorizationStatus = await currentAuthorizationStatus()
+        let storedSettings = storedReminderSettings()
+        return NotificationSettingsState(
+            authorizationStatus: authorizationStatus,
+            dailyReminderEnabled: storedSettings.enabled,
+            reminderHour: storedSettings.hour,
+            reminderMinute: storedSettings.minute
+        )
+    }
+
+    func requestNotificationAuthorization() async throws -> NotificationSettingsState {
         #if canImport(UIKit)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, error in
+        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
-                    continuation.resume(returning: ())
+                    continuation.resume(returning: granted)
                 }
             }
         }
+        #endif
 
+        let settings = await fetchNotificationSettings()
+        await syncRemoteNotificationRegistration(using: settings)
+        try await applyReminderSchedule(using: settings)
+        return settings
+    }
+
+    func updateDailyReflectionReminder(
+        enabled: Bool,
+        hour: Int,
+        minute: Int
+    ) async throws -> NotificationSettingsState {
+        defaults.set(enabled, forKey: DefaultsKeys.reminderEnabled)
+        defaults.set(hour, forKey: DefaultsKeys.reminderHour)
+        defaults.set(minute, forKey: DefaultsKeys.reminderMinute)
+
+        let settings = await fetchNotificationSettings()
+        try await applyReminderSchedule(using: settings)
+        return settings
+    }
+
+    func syncNotificationSettings() async throws -> NotificationSettingsState {
+        let settings = await fetchNotificationSettings()
+        await syncRemoteNotificationRegistration(using: settings)
+        try await applyReminderSchedule(using: settings)
+        return settings
+    }
+
+    private func syncRemoteNotificationRegistration(using settings: NotificationSettingsState) async {
+        #if canImport(UIKit)
+        guard settings.authorizationStatus.isAuthorized else { return }
         await MainActor.run {
             UIApplication.shared.registerForRemoteNotifications()
         }
         #endif
     }
 
-    func scheduleDailyReflectionReminder() async throws {
+    private func applyReminderSchedule(using settings: NotificationSettingsState) async throws {
         #if canImport(UIKit)
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [reminderIdentifier])
+
+        guard settings.authorizationStatus.isAuthorized, settings.dailyReminderEnabled else {
+            return
+        }
+
         let content = UNMutableNotificationContent()
         content.title = "LoveSaving Reminder"
         content.body = "Take a moment to reflect and log a meaningful moment today."
         content.sound = .default
 
         var components = DateComponents()
-        components.hour = 20
-        components.minute = 0
+        components.hour = settings.reminderHour
+        components.minute = settings.reminderMinute
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-        let request = UNNotificationRequest(identifier: "daily_reflection", content: content, trigger: trigger)
+        let request = UNNotificationRequest(identifier: reminderIdentifier, content: content, trigger: trigger)
         try await UNUserNotificationCenter.current().add(request)
         #endif
+    }
+
+    private func currentAuthorizationStatus() async -> NotificationAuthorizationState {
+        #if canImport(UIKit)
+        return await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                continuation.resume(returning: NotificationAuthorizationState(settings.authorizationStatus))
+            }
+        }
+        #else
+        return .notDetermined
+        #endif
+    }
+
+    private func storedReminderSettings() -> (enabled: Bool, hour: Int, minute: Int) {
+        let enabled = defaults.object(forKey: DefaultsKeys.reminderEnabled) as? Bool ?? true
+        let hour = defaults.object(forKey: DefaultsKeys.reminderHour) as? Int ?? 20
+        let minute = defaults.object(forKey: DefaultsKeys.reminderMinute) as? Int ?? 0
+        return (enabled, hour, minute)
     }
 }
 
@@ -835,6 +1020,23 @@ extension FirebaseMessagingService: MessagingDelegate {
         continuation.yield(fcmToken)
     }
 }
+
+#if canImport(UIKit)
+private extension NotificationAuthorizationState {
+    init(_ status: UNAuthorizationStatus) {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            self = .authorized
+        case .denied:
+            self = .denied
+        case .notDetermined:
+            self = .notDetermined
+        @unknown default:
+            self = .notDetermined
+        }
+    }
+}
+#endif
 
 private func firestoreNullable(_ value: String?) -> Any {
     value ?? NSNull()
@@ -887,14 +1089,21 @@ private extension DocumentSnapshot {
     }
 
     func toInvite() -> Invite? {
-        guard let data = data(),
+        let resolvedData = data(with: .estimate) ?? data()
+        guard let data = resolvedData,
               let fromUid = data["fromUid"] as? String,
               let toUid = data["toUid"] as? String,
               let statusRaw = data["status"] as? String,
-              let status = InviteStatus(rawValue: statusRaw),
-              let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() else {
+              let status = InviteStatus(rawValue: statusRaw) else {
             return nil
         }
+
+        let respondedAt = (data["respondedAt"] as? Timestamp)?.dateValue()
+        let expiresAt = (data["expiresAt"] as? Timestamp)?.dateValue()
+        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
+            ?? respondedAt
+            ?? expiresAt
+            ?? Date()
 
         return Invite(
             id: documentID,
@@ -902,10 +1111,12 @@ private extension DocumentSnapshot {
             fromDisplayName: data["fromDisplayName"] as? String,
             fromEmail: data["fromEmail"] as? String,
             toUid: toUid,
+            toDisplayName: data["toDisplayName"] as? String,
+            toEmail: data["toEmail"] as? String,
             status: status,
             createdAt: createdAt,
-            respondedAt: (data["respondedAt"] as? Timestamp)?.dateValue(),
-            expiresAt: (data["expiresAt"] as? Timestamp)?.dateValue()
+            respondedAt: respondedAt,
+            expiresAt: expiresAt
         )
     }
 

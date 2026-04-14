@@ -1,5 +1,8 @@
 import FirebaseCore
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private enum FirebaseLoggerMode: String {
     case none
@@ -15,6 +18,9 @@ private enum FirebaseLoggerMode: String {
 
 @main
 struct LoveSavingApp: App {
+#if canImport(UIKit)
+    @UIApplicationDelegateAdaptor(LoveSavingAppDelegate.self) private var appDelegate
+#endif
     @StateObject private var session: AppSession
     @StateObject private var locationManager: LocationManager
     @State private var requestedPermissionsUserID: String?
@@ -80,6 +86,6 @@ struct LoveSavingApp: App {
 
         requestedPermissionsUserID = uid
         locationManager.requestAuthorizationIfNeeded()
-        await session.requestNotifications(suppressErrors: true)
+        await session.syncNotificationSettingsOnLaunch(suppressErrors: true)
     }
 }

@@ -179,12 +179,14 @@ service cloud.firestore {
     function validInviteCreate() {
       let d = request.resource.data;
       return d.keys().hasAll(["fromUid", "toUid", "status", "createdAt"])
-        && d.keys().hasOnly(["fromUid", "fromDisplayName", "fromEmail", "toUid", "status", "createdAt", "respondedAt", "expiresAt"])
+        && d.keys().hasOnly(["fromUid", "fromDisplayName", "fromEmail", "toUid", "toDisplayName", "toEmail", "status", "createdAt", "respondedAt", "expiresAt"])
         && d.fromUid is string
         && d.toUid is string
         && d.fromUid != d.toUid
         && (!d.keys().hasAny(["fromDisplayName"]) || isNullableString(d.fromDisplayName))
         && (!d.keys().hasAny(["fromEmail"]) || isNullableString(d.fromEmail))
+        && (!d.keys().hasAny(["toDisplayName"]) || isNullableString(d.toDisplayName))
+        && (!d.keys().hasAny(["toEmail"]) || isNullableString(d.toEmail))
         && d.status == "pending"
         && d.createdAt == request.time
         && (!d.keys().hasAny(["expiresAt"]) || d.expiresAt == null || d.expiresAt is timestamp)
@@ -200,6 +202,8 @@ service cloud.firestore {
         && d.toUid == resource.data.toUid
         && isNullableString(d.fromDisplayName)
         && isNullableString(d.fromEmail)
+        && isNullableString(d.toDisplayName)
+        && isNullableString(d.toEmail)
         && (
           (resource.data.fromDisplayName is string && d.fromDisplayName == resource.data.fromDisplayName)
           || (!(resource.data.fromDisplayName is string) && d.fromDisplayName == null)
@@ -207,6 +211,14 @@ service cloud.firestore {
         && (
           (resource.data.fromEmail is string && d.fromEmail == resource.data.fromEmail)
           || (!(resource.data.fromEmail is string) && d.fromEmail == null)
+        )
+        && (
+          (resource.data.toDisplayName is string && d.toDisplayName == resource.data.toDisplayName)
+          || (!(resource.data.toDisplayName is string) && d.toDisplayName == null)
+        )
+        && (
+          (resource.data.toEmail is string && d.toEmail == resource.data.toEmail)
+          || (!(resource.data.toEmail is string) && d.toEmail == null)
         )
         && d.createdAt == resource.data.createdAt
         && d.expiresAt == resource.data.expiresAt

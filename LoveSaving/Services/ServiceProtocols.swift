@@ -6,6 +6,12 @@ struct AuthUser: Equatable {
     let displayName: String?
 }
 
+struct ResolvedUserIdentity: Equatable, Sendable {
+    let uid: String
+    let displayName: String?
+    let email: String?
+}
+
 struct AIInsightsCapabilities: Equatable, Decodable {
     let enabled: Bool
     let streamingSupported: Bool
@@ -129,6 +135,41 @@ enum AppError: LocalizedError {
     }
 }
 
+enum NotificationAuthorizationState: String, Equatable, Sendable {
+    case notDetermined
+    case denied
+    case authorized
+
+    var isAuthorized: Bool {
+        self == .authorized
+    }
+
+    var displayTitle: String {
+        switch self {
+        case .notDetermined:
+            return "Not Enabled"
+        case .denied:
+            return "Denied"
+        case .authorized:
+            return "Enabled"
+        }
+    }
+}
+
+struct NotificationSettingsState: Equatable, Sendable {
+    var authorizationStatus: NotificationAuthorizationState
+    var dailyReminderEnabled: Bool
+    var reminderHour: Int
+    var reminderMinute: Int
+
+    static let `default` = NotificationSettingsState(
+        authorizationStatus: .notDetermined,
+        dailyReminderEnabled: true,
+        reminderHour: 20,
+        reminderMinute: 0
+    )
+}
+
 @MainActor
 protocol RealtimeSubscription: AnyObject {
     func cancel()
@@ -151,6 +192,7 @@ protocol UserDataServicing {
     func upsertUser(_ user: UserProfile) async throws
     func fetchUser(uid: String) async throws -> UserProfile?
     func findUser(email: String) async throws -> UserProfile?
+    func resolveUser(identifier: String) async throws -> ResolvedUserIdentity?
     func resolveUserID(identifier: String) async throws -> String?
     func setCurrentGroup(uid: String, groupId: String?) async throws
     func setHasCompletedOnboarding(uid: String, completed: Bool) async throws
@@ -164,9 +206,15 @@ protocol InviteServicing {
         toUid: String,
         expiresAt: Date?,
         fromDisplayName: String?,
-        fromEmail: String?
+        fromEmail: String?,
+        toDisplayName: String?,
+        toEmail: String?
     ) async throws -> Invite
-    func fetchInboundInvites(for uid: String) async throws -> [Invite]
+    func fetchInvites(for uid: String) async throws -> [Invite]
+    func observeInvites(
+        for uid: String,
+        onChange: @escaping @MainActor (Result<[Invite], Error>) -> Void
+    ) -> any RealtimeSubscription
     func respondInvite(inviteId: String, status: InviteStatus, respondedAt: Date) async throws
 }
 
@@ -203,9 +251,22 @@ protocol MediaServicing {
 
 @MainActor
 protocol MessagingServicing {
-    func requestNotificationAuthorization() async throws
-    func scheduleDailyReflectionReminder() async throws
+    func fetchNotificationSettings() async -> NotificationSettingsState
+    func requestNotificationAuthorization() async throws -> NotificationSettingsState
+    func updateDailyReflectionReminder(
+        enabled: Bool,
+        hour: Int,
+        minute: Int
+    ) async throws -> NotificationSettingsState
+    func syncNotificationSettings() async throws -> NotificationSettingsState
+    func fetchCurrentToken() async -> String?
     var tokenStream: AsyncStream<String> { get }
+}
+
+extension MessagingServicing {
+    func fetchCurrentToken() async -> String? {
+        nil
+    }
 }
 
 protocol AIInsightsAvailabilityServicing {

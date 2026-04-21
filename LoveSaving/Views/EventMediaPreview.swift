@@ -19,8 +19,8 @@ struct EventMediaPreviewSheet: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: event.media.count > 1 ? .automatic : .never))
-            .background(Color.black.ignoresSafeArea())
-            .navigationTitle("Image Preview")
+            .background(Color(.systemBackground))
+            .navigationTitle(event.media.count == 1 ? "Image" : "Images")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -39,78 +39,169 @@ private struct EventMediaPreviewPage: View {
     let totalCount: Int
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Color.black.ignoresSafeArea()
+        GeometryReader { proxy in
+            VStack(spacing: 16) {
+                Spacer(minLength: 0)
 
-            EventMediaPreviewImage(media: media)
-                .padding()
+                EventMediaPreviewImage(
+                    media: media,
+                    maxWidth: min(proxy.size.width - 40, 420),
+                    maxHeight: min(proxy.size.height * 0.62, 460)
+                )
 
-            if totalCount > 1 {
-                Text("\(index + 1) / \(totalCount)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.5), in: Capsule())
-                    .padding()
+                if totalCount > 1 {
+                    Text("\(index + 1) / \(totalCount)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
+                }
+
+                Spacer(minLength: 0)
             }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .padding(.vertical, 24)
         }
     }
 }
 
-private struct EventMediaPreviewImage: View {
-    private enum Phase {
-        case loading
-        case loaded(UIImage)
-        case failed
-    }
+struct EventMediaThumbnailStrip: View {
+    let media: [EventMedia]
+    let onSelect: () -> Void
 
-    private static let imageCache = NSCache<NSString, UIImage>()
-    private static let maxDownloadBytes: Int64 = 10 * 1024 * 1024
-
-    let media: EventMedia
-
-    @State private var phase: Phase = .loading
+    private let maxVisibleCount = 4
 
     var body: some View {
-        Group {
-            switch phase {
-            case .loading:
-                ProgressView("Loading image...")
-                    .tint(.white)
-                    .foregroundStyle(.white)
-            case .loaded(let image):
-                GeometryReader { proxy in
-                    ScrollView([.horizontal, .vertical]) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(
-                                minWidth: proxy.size.width,
-                                minHeight: proxy.size.height
-                            )
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(Array(visibleMedia.enumerated()), id: \.offset) { index, item in
+                    Button {
+                        onSelect()
+                    } label: {
+                        EventMediaThumbnail(
+                            media: item,
+                            remainingCount: remainingCount(for: index)
+                        )
                     }
-                    .scrollIndicators(.hidden)
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("journey.imagePreview.thumbnail")
                 }
-            case .failed:
-                ContentUnavailableView(
-                    "Unable to Load Image",
-                    systemImage: "photo.badge.exclamationmark",
-                    description: Text("This attachment could not be previewed right now.")
-                )
-                .foregroundStyle(.white)
+            }
+            .padding(.vertical, 2)
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityIdentifier("journey.imagePreview.open")
+    }
+
+    private var visibleMedia: [EventMedia] {
+        Array(media.prefix(maxVisibleCount))
+    }
+
+    private func remainingCount(for index: Int) -> Int? {
+        guard index == visibleMedia.count - 1, media.count > visibleMedia.count else {
+            return nil
+        }
+        return media.count - visibleMedia.count
+    }
+}
+
+private struct EventMediaThumbnail: View {
+    let media: EventMedia
+    let remainingCount: Int?
+
+    var body: some View {
+        EventMediaImageLoader(media: media) { phase in
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+
+                switch phase {
+                case .loading:
+                    ProgressView()
+                        .controlSize(.small)
+                case .loaded(let image):
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 96, height: 96)
+                        .clipped()
+                case .failed:
+                    Image(systemName: "photo.badge.exclamationmark")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let remainingCount {
+                    Color.black.opacity(0.45)
+                    Text("+\(remainingCount)")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: media.storagePath) {
-            await loadImage()
+        .frame(width: 96, height: 96)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct EventMediaPreviewImage: View {
+    let media: EventMedia
+    let maxWidth: CGFloat
+    let maxHeight: CGFloat
+
+    var body: some View {
+        EventMediaImageLoader(media: media) { phase in
+            Group {
+                switch phase {
+                case .loading:
+                    ProgressView("Loading image...")
+                        .frame(maxWidth: maxWidth, maxHeight: maxHeight)
+                case .loaded(let image):
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: maxWidth, maxHeight: maxHeight)
+                case .failed:
+                    ContentUnavailableView(
+                        "Unable to Load Image",
+                        systemImage: "photo.badge.exclamationmark",
+                        description: Text("This attachment could not be previewed right now.")
+                    )
+                    .frame(maxWidth: maxWidth, maxHeight: maxHeight)
+                }
+            }
+            .frame(width: maxWidth, height: maxHeight)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
+    }
+}
+
+private enum EventMediaImagePhase {
+    case loading
+    case loaded(UIImage)
+    case failed
+}
+
+private struct EventMediaImageLoader<Content: View>: View {
+    let media: EventMedia
+    @ViewBuilder let content: (EventMediaImagePhase) -> Content
+
+    @State private var phase: EventMediaImagePhase = .loading
+
+    var body: some View {
+        content(phase)
+            .task(id: media.storagePath) {
+                await loadImage()
+            }
     }
 
     @MainActor
     private func loadImage() async {
         let cacheKey = media.storagePath as NSString
-        if let cached = Self.imageCache.object(forKey: cacheKey) {
+        if let cached = EventMediaImageStore.imageCache.object(forKey: cacheKey) {
             phase = .loaded(cached)
             return
         }
@@ -118,20 +209,25 @@ private struct EventMediaPreviewImage: View {
         phase = .loading
 
         do {
-            let data = try await imageData(for: media)
+            let data = try await EventMediaImageStore.imageData(for: media)
             guard let image = UIImage(data: data) else {
                 phase = .failed
                 return
             }
 
-            Self.imageCache.setObject(image, forKey: cacheKey)
+            EventMediaImageStore.imageCache.setObject(image, forKey: cacheKey)
             phase = .loaded(image)
         } catch {
             phase = .failed
         }
     }
+}
 
-    private func imageData(for media: EventMedia) async throws -> Data {
+private enum EventMediaImageStore {
+    static let imageCache = NSCache<NSString, UIImage>()
+    static let maxDownloadBytes: Int64 = 10 * 1024 * 1024
+
+    static func imageData(for media: EventMedia) async throws -> Data {
         if let inlineData = Self.decodeInlineDataURL(media.storagePath) {
             return inlineData
         }

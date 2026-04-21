@@ -570,13 +570,14 @@ final class UITestEventService: EventServicing {
         Array((store.eventsByGroup[groupId] ?? []).sorted(by: { $0.occurredAt > $1.occurredAt }).prefix(limit))
     }
 
-    func updateEvent(groupId: String, eventId: String, note: String?, media: [EventMedia]) async throws {
+    func updateEvent(groupId: String, eventId: String, note: String?, location: EventLocation, media: [EventMedia]) async throws {
         guard var events = store.eventsByGroup[groupId],
               let index = events.firstIndex(where: { $0.id == eventId }) else {
             throw AppError.eventNotFound
         }
 
         events[index].note = note
+        events[index].location = location
         events[index].media = media
         events[index].updatedAt = Date()
         store.eventsByGroup[groupId] = events

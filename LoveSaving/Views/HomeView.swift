@@ -1,3 +1,4 @@
+import Foundation
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -8,6 +9,7 @@ struct HomeView: View {
 
     @StateObject private var viewModel: HomeViewModel
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var composerLocation = EditableEventLocation()
     private let tutorialStep: OnboardingPart2Step?
 
     @MainActor
@@ -127,6 +129,16 @@ struct HomeView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    if !viewModel.isTutorialMode {
+                        EventLocationEditorSection(
+                            title: "Location",
+                            draft: $composerLocation,
+                            currentLocation: currentEditableLocation,
+                            accessibilityPrefix: "home.location",
+                            isDisabled: false
+                        )
+                    }
+
                     Section("Image") {
                         PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                             Text(hasSelectedImage ? "Replace Image" : "Add Image")
@@ -155,12 +167,11 @@ struct HomeView: View {
                             Task {
                                 await viewModel.submit(
                                     using: session,
-                                    coordinate: locationManager.coordinate.map { ($0.latitude, $0.longitude) },
-                                    addressText: locationManager.addressText
+                                    location: composerLocation.eventLocation
                                 )
                             }
                         }
-                        .disabled(viewModel.tapCount == 0 || !isSubmitInteractive)
+                        .disabled(viewModel.tapCount == 0 || !isSubmitInteractive || (!viewModel.isTutorialMode && composerLocation.eventLocation == nil))
                         .accessibilityIdentifier("home.submit")
                         .tutorialTarget(.submit)
                     }
@@ -221,6 +232,13 @@ struct HomeView: View {
             guard !viewModel.isTutorialMode else { return }
             locationManager.requestAuthorizationIfNeeded()
         }
+        .onChange(of: viewModel.showComposer) { _, isPresented in
+            if isPresented {
+                seedComposerLocationIfNeeded()
+            } else {
+                composerLocation = EditableEventLocation()
+            }
+        }
     }
 
     private var tutorialTitlePlaceholder: some View {
@@ -261,6 +279,20 @@ struct HomeView: View {
             return false
         }
     }
+
+    private var currentEditableLocation: EditableEventLocation? {
+        guard let coordinate = locationManager.coordinate else { return nil }
+        return EditableEventLocation(
+            addressText: locationManager.addressText ?? "",
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude
+        )
+    }
+
+    private func seedComposerLocationIfNeeded() {
+        guard composerLocation.isBlank, let currentEditableLocation else { return }
+        composerLocation = currentEditableLocation
+    }
 }
 
 private extension View {
@@ -274,5 +306,106 @@ private extension View {
         } else {
             self
         }
+    }
+}
+
+struct EditableEventLocation: Equatable {
+    var addressText: String
+    var latitudeText: String
+    var longitudeText: String
+
+    init(addressText: String = "", latitudeText: String = "", longitudeText: String = "") {
+        self.addressText = addressText
+        self.latitudeText = latitudeText
+        self.longitudeText = longitudeText
+    }
+
+    init(addressText: String = "", latitude: Double, longitude: Double) {
+        self.addressText = addressText
+        self.latitudeText = Self.formatCoordinate(latitude)
+        self.longitudeText = Self.formatCoordinate(longitude)
+    }
+
+    var eventLocation: EventLocation? {
+        guard let latitude = Double(latitudeText.trimmedText),
+              let longitude = Double(longitudeText.trimmedText) else {
+            return nil
+        }
+
+        return EventLocation(
+            lat: latitude,
+            lng: longitude,
+            addressText: addressText.trimmedText.nilIfEmpty
+        )
+    }
+
+    var isBlank: Bool {
+        addressText.trimmedText.isEmpty
+            && latitudeText.trimmedText.isEmpty
+            && longitudeText.trimmedText.isEmpty
+    }
+
+    var showsInvalidCoordinates: Bool {
+        let hasCoordinateInput = !latitudeText.trimmedText.isEmpty || !longitudeText.trimmedText.isEmpty
+        return hasCoordinateInput && eventLocation == nil
+    }
+
+    private static func formatCoordinate(_ value: Double) -> String {
+        String(format: "%.6f", value)
+    }
+}
+
+struct EventLocationEditorSection: View {
+    let title: String
+    @Binding var draft: EditableEventLocation
+    let currentLocation: EditableEventLocation?
+    let accessibilityPrefix: String
+    let isDisabled: Bool
+
+    var body: some View {
+        Section(title) {
+            TextField("Address or label", text: $draft.addressText)
+                .disabled(isDisabled)
+                .accessibilityIdentifier("\(accessibilityPrefix).address")
+
+            TextField("Latitude", text: $draft.latitudeText)
+                .keyboardType(.numbersAndPunctuation)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .disabled(isDisabled)
+                .accessibilityIdentifier("\(accessibilityPrefix).latitude")
+
+            TextField("Longitude", text: $draft.longitudeText)
+                .keyboardType(.numbersAndPunctuation)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .disabled(isDisabled)
+                .accessibilityIdentifier("\(accessibilityPrefix).longitude")
+
+            if let currentLocation {
+                Button("Use Current Location") {
+                    draft = currentLocation
+                }
+                .disabled(isDisabled)
+                .accessibilityIdentifier("\(accessibilityPrefix).current")
+            }
+
+            if draft.showsInvalidCoordinates {
+                Text("Enter valid latitude and longitude numbers.")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+}
+
+private extension String {
+    var trimmedText: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var nilIfEmpty: String? {
+        let trimmed = trimmedText
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

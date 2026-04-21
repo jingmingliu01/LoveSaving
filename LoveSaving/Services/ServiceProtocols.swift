@@ -105,6 +105,7 @@ enum AppError: LocalizedError {
     case invalidInviteState
     case invalidGroupState
     case locationUnavailable
+    case invalidLocation
     case emptyTapBurst
     case imageTooLargeForUpload
     case eventNotFound
@@ -125,6 +126,8 @@ enum AppError: LocalizedError {
             return "Group is inactive or invalid."
         case .locationUnavailable:
             return "Current location is not available yet."
+        case .invalidLocation:
+            return "Enter a valid location before continuing."
         case .emptyTapBurst:
             return "Tap at least once before submitting."
         case .imageTooLargeForUpload:
@@ -233,7 +236,7 @@ protocol GroupServicing {
 protocol EventServicing {
     func createEventAndUpdateGroup(groupId: String, createdBy: String, draft: EventDraft, eventId: String?) async throws -> LoveEvent
     func fetchEvents(groupId: String, limit: Int) async throws -> [LoveEvent]
-    func updateEvent(groupId: String, eventId: String, note: String?, media: [EventMedia]) async throws
+    func updateEvent(groupId: String, eventId: String, note: String?, location: EventLocation, media: [EventMedia]) async throws
     func deleteEventAndUpdateGroup(groupId: String, eventId: String) async throws
     func appendMedia(groupId: String, eventId: String, media: EventMedia) async throws
     func observeRecentEvents(

@@ -1,5 +1,4 @@
 import Combine
-import CoreLocation
 import XCTest
 @testable import LoveSaving
 
@@ -228,17 +227,17 @@ final class AppSessionFlowTests: XCTestCase {
             type: .deposit,
             note: "Nice job",
             imageData: Data("image".utf8),
-            coordinate: CLLocationCoordinate2D(latitude: 37.7, longitude: -122.4),
-            addressText: "San Francisco"
+            location: EventLocation(lat: 37.7, lng: -122.4, addressText: "San Francisco")
         )
 
         XCTAssertTrue(result)
         XCTAssertEqual(session.events.count, 2)
         XCTAssertEqual(session.events.first?.media.count, 1)
+        XCTAssertEqual(session.events.first?.location.addressText, "San Francisco")
         XCTAssertNil(session.globalErrorMessage)
     }
 
-    func testSubmitTapBurstWithoutCoordinateFails() async {
+    func testSubmitTapBurstWithoutLocationFails() async {
         let session = makeSession(scenario: .linked).session
         await waitUntil("auth observer loads linked group") {
             session.isSignedIn && session.group != nil
@@ -249,12 +248,11 @@ final class AppSessionFlowTests: XCTestCase {
             type: .deposit,
             note: nil,
             imageData: nil,
-            coordinate: nil,
-            addressText: nil
+            location: nil
         )
 
         XCTAssertFalse(result)
-        XCTAssertEqual(session.globalErrorMessage, AppError.locationUnavailable.localizedDescription)
+        XCTAssertEqual(session.globalErrorMessage, AppError.invalidLocation.localizedDescription)
     }
 
     func testRealtimeHomeUpdatesAfterRemoteEventWrite() async throws {
@@ -476,12 +474,14 @@ final class AppSessionFlowTests: XCTestCase {
         let didAddImage = await session.updateJourneyEvent(
             seedEvent,
             note: "Updated note",
+            location: EventLocation(lat: 48.8566, lng: 2.3522, addressText: "Paris"),
             imageData: Data("image".utf8),
             removeExistingImage: false
         )
 
         XCTAssertTrue(didAddImage)
         XCTAssertEqual(session.events.first?.note, "Updated note")
+        XCTAssertEqual(session.events.first?.location.addressText, "Paris")
         XCTAssertEqual(session.events.first?.media.count, 1)
 
         guard let updatedEvent = session.events.first else {
@@ -492,12 +492,14 @@ final class AppSessionFlowTests: XCTestCase {
         let didRemoveImage = await session.updateJourneyEvent(
             updatedEvent,
             note: "Image removed",
+            location: EventLocation(lat: 51.5072, lng: -0.1276, addressText: "London"),
             imageData: nil,
             removeExistingImage: true
         )
 
         XCTAssertTrue(didRemoveImage)
         XCTAssertEqual(session.events.first?.note, "Image removed")
+        XCTAssertEqual(session.events.first?.location.addressText, "London")
         XCTAssertEqual(session.events.first?.media.count, 0)
         XCTAssertNil(session.globalErrorMessage)
     }
@@ -632,8 +634,7 @@ final class AppSessionFlowTests: XCTestCase {
             type: .deposit,
             note: nil,
             imageData: nil,
-            coordinate: nil,
-            addressText: nil
+            location: nil
         )
 
         XCTAssertEqual(crashReporter.customValues["last_operation"] as? String, "event.submitTapBurst")
@@ -1160,13 +1161,14 @@ private final class CountingEventService: EventServicing {
         return Array(store.eventsByGroup[groupId, default: []].prefix(limit))
     }
 
-    func updateEvent(groupId: String, eventId: String, note: String?, media: [EventMedia]) async throws {
+    func updateEvent(groupId: String, eventId: String, note: String?, location: EventLocation, media: [EventMedia]) async throws {
         guard var events = store.eventsByGroup[groupId],
               let index = events.firstIndex(where: { $0.id == eventId }) else {
             throw AppError.eventNotFound
         }
 
         events[index].note = note
+        events[index].location = location
         events[index].media = media
         events[index].updatedAt = Date()
         store.eventsByGroup[groupId] = events

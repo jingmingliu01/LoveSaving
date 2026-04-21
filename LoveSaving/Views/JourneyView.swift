@@ -12,6 +12,7 @@ struct JourneyView: View {
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var editingEvent: LoveEvent?
     @State private var deletingEvent: LoveEvent?
+    @State private var previewingEvent: LoveEvent?
 
     enum Mode: String, CaseIterable, Identifiable {
         case list = "List"
@@ -46,9 +47,18 @@ struct JourneyView: View {
                                     .font(.subheadline.weight(.semibold))
                                 
                                 if !event.media.isEmpty {
-                                    Label("\(event.media.count) image\(event.media.count == 1 ? "" : "s") attached", systemImage: "photo")
+                                    Button {
+                                        previewingEvent = event
+                                    } label: {
+                                        Label(
+                                            "\(event.media.count) image\(event.media.count == 1 ? "" : "s") attached",
+                                            systemImage: "photo"
+                                        )
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier("journey.imagePreview.open")
                                 }
 
                                 HStack {
@@ -127,6 +137,9 @@ struct JourneyView: View {
         .sheet(item: $editingEvent) { event in
             JourneyEventEditor(event: event)
                 .environmentObject(session)
+        }
+        .sheet(item: $previewingEvent) { event in
+            EventMediaPreviewSheet(event: event)
         }
         .alert(
             "Delete Journey Item?",

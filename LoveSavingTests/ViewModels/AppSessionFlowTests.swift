@@ -255,6 +255,31 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertEqual(session.globalErrorMessage, AppError.invalidLocation.localizedDescription)
     }
 
+    func testEditableEventLocationRejectsOutOfRangeCoordinates() {
+        let valid = EditableEventLocation(
+            addressText: "Valid",
+            latitudeText: "90",
+            longitudeText: "-180"
+        )
+        XCTAssertEqual(valid.eventLocation?.lat, 90)
+        XCTAssertEqual(valid.eventLocation?.lng, -180)
+        XCTAssertFalse(valid.showsInvalidCoordinates)
+
+        let invalidLatitude = EditableEventLocation(
+            latitudeText: "91",
+            longitudeText: "0"
+        )
+        XCTAssertNil(invalidLatitude.eventLocation)
+        XCTAssertTrue(invalidLatitude.showsInvalidCoordinates)
+
+        let invalidLongitude = EditableEventLocation(
+            latitudeText: "0",
+            longitudeText: "-181"
+        )
+        XCTAssertNil(invalidLongitude.eventLocation)
+        XCTAssertTrue(invalidLongitude.showsInvalidCoordinates)
+    }
+
     func testRealtimeHomeUpdatesAfterRemoteEventWrite() async throws {
         let harness = makeRealtimeHarness(scenario: .linked)
         let session = harness.session

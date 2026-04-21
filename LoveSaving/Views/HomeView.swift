@@ -328,7 +328,11 @@ struct EditableEventLocation: Equatable {
 
     var eventLocation: EventLocation? {
         guard let latitude = Double(latitudeText.trimmedText),
-              let longitude = Double(longitudeText.trimmedText) else {
+              let longitude = Double(longitudeText.trimmedText),
+              latitude.isFinite,
+              longitude.isFinite,
+              Self.validLatitudeRange.contains(latitude),
+              Self.validLongitudeRange.contains(longitude) else {
             return nil
         }
 
@@ -353,6 +357,9 @@ struct EditableEventLocation: Equatable {
     private static func formatCoordinate(_ value: Double) -> String {
         String(format: "%.6f", value)
     }
+
+    private static let validLatitudeRange = -90.0...90.0
+    private static let validLongitudeRange = -180.0...180.0
 }
 
 struct EventLocationEditorSection: View {
@@ -391,7 +398,7 @@ struct EventLocationEditorSection: View {
             }
 
             if draft.showsInvalidCoordinates {
-                Text("Enter valid latitude and longitude numbers.")
+                Text("Enter latitude from -90 to 90 and longitude from -180 to 180.")
                     .font(.footnote)
                     .foregroundStyle(.red)
             }

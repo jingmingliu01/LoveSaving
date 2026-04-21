@@ -1,4 +1,3 @@
-import CoreLocation
 import Foundation
 import Combine
 
@@ -259,8 +258,7 @@ final class AppSession: ObservableObject {
         note: String?,
         imageData: Data?,
         imageFileExtension: String = "jpg",
-        coordinate: CLLocationCoordinate2D?,
-        addressText: String?
+        location: EventLocation?
     ) async -> Bool {
         await runBusyTask(
             context: .tapBurst(
@@ -279,8 +277,8 @@ final class AppSession: ObservableObject {
             guard let group else {
                 throw AppError.missingGroup
             }
-            guard let coordinate else {
-                throw AppError.locationUnavailable
+            guard let location else {
+                throw AppError.invalidLocation
             }
 
             let occurredAt = Date()
@@ -288,7 +286,7 @@ final class AppSession: ObservableObject {
             let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
             let resolvedNote = (trimmedNote?.isEmpty == false)
                 ? trimmedNote
-                : NoteBuilder.defaultNote(occurredAt: occurredAt, addressText: addressText)
+                : NoteBuilder.defaultNote(occurredAt: occurredAt, addressText: location.addressText)
 
             var draft = EventDraft(
                 type: type,
@@ -296,11 +294,7 @@ final class AppSession: ObservableObject {
                 delta: delta,
                 note: resolvedNote,
                 occurredAt: occurredAt,
-                location: EventLocation(
-                    lat: coordinate.latitude,
-                    lng: coordinate.longitude,
-                    addressText: addressText
-                ),
+                location: location,
                 media: []
             )
 
@@ -425,6 +419,7 @@ final class AppSession: ObservableObject {
     func updateJourneyEvent(
         _ event: LoveEvent,
         note: String,
+        location: EventLocation?,
         imageData: Data?,
         imageFileExtension: String = "jpg",
         removeExistingImage: Bool
@@ -432,6 +427,9 @@ final class AppSession: ObservableObject {
         await runBusyTask(context: .source("event.updateJourneyEvent")) { [self] in
             guard let group else {
                 throw AppError.missingGroup
+            }
+            guard let location else {
+                throw AppError.invalidLocation
             }
 
             let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -457,6 +455,7 @@ final class AppSession: ObservableObject {
                     groupId: group.id,
                     eventId: event.id,
                     note: resolvedNote,
+                    location: location,
                     media: updatedMedia
                 )
             } catch {

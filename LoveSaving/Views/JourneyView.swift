@@ -46,10 +46,22 @@ struct JourneyView: View {
                                     .foregroundStyle(event.delta >= 0 ? .green : .red)
                                     .font(.subheadline.weight(.semibold))
                                 
-                                if !event.media.isEmpty {
-                                    EventMediaThumbnailStrip(media: event.media) {
+                                if let previewMedia = event.media.first {
+                                    EventMediaInlinePreview(
+                                        media: previewMedia,
+                                        additionalImageCount: max(event.media.count - 1, 0)
+                                    ) {
                                         previewingEvent = event
                                     }
+                                    .accessibilityIdentifier("journey.imagePreview.open")
+
+                                    Text(
+                                        event.media.count == 1
+                                            ? "Image preview"
+                                            : "\(event.media.count) images attached"
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                                 }
 
                                 HStack {

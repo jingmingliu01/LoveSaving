@@ -2,6 +2,45 @@ import FirebaseStorage
 import SwiftUI
 import UIKit
 
+struct EventMediaInlinePreview: View {
+    let media: EventMedia
+    let additionalImageCount: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                EventMediaImageContainer(media: media) { image in
+                    Image(uiImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(maxWidth: .infinity, minHeight: 150, maxHeight: 220)
+                .padding(12)
+                .background(Color.secondary.opacity(0.08))
+
+                if additionalImageCount > 0 {
+                    Text("+\(additionalImageCount)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.65), in: Capsule())
+                        .padding(12)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.15))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct EventMediaPreviewSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -19,8 +58,8 @@ struct EventMediaPreviewSheet: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: event.media.count > 1 ? .automatic : .never))
-            .background(Color(.systemBackground))
-            .navigationTitle(event.media.count == 1 ? "Image" : "Images")
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle("Image Preview")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -39,163 +78,59 @@ private struct EventMediaPreviewPage: View {
     let totalCount: Int
 
     var body: some View {
-        GeometryReader { proxy in
-            VStack(spacing: 16) {
-                Spacer(minLength: 0)
+        ZStack(alignment: .bottomTrailing) {
+            Color.black.ignoresSafeArea()
 
-                EventMediaPreviewImage(
-                    media: media,
-                    maxWidth: min(proxy.size.width - 40, 420),
-                    maxHeight: min(proxy.size.height * 0.62, 460)
-                )
+            EventMediaPreviewImage(media: media)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
 
-                if totalCount > 1 {
-                    Text("\(index + 1) / \(totalCount)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color(.secondarySystemBackground), in: Capsule())
-                }
-
-                Spacer(minLength: 0)
+            if totalCount > 1 {
+                Text("\(index + 1) / \(totalCount)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.5), in: Capsule())
+                    .padding()
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .padding(.vertical, 24)
         }
     }
 }
 
-struct EventMediaThumbnailStrip: View {
-    let media: [EventMedia]
-    let onSelect: () -> Void
-
-    private let maxVisibleCount = 4
-
-    var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(Array(visibleMedia.enumerated()), id: \.offset) { index, item in
-                    Button {
-                        onSelect()
-                    } label: {
-                        EventMediaThumbnail(
-                            media: item,
-                            remainingCount: remainingCount(for: index)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("journey.imagePreview.thumbnail")
-                }
-            }
-            .padding(.vertical, 2)
-        }
-        .scrollIndicators(.hidden)
-        .accessibilityIdentifier("journey.imagePreview.open")
-    }
-
-    private var visibleMedia: [EventMedia] {
-        Array(media.prefix(maxVisibleCount))
-    }
-
-    private func remainingCount(for index: Int) -> Int? {
-        guard index == visibleMedia.count - 1, media.count > visibleMedia.count else {
-            return nil
-        }
-        return media.count - visibleMedia.count
-    }
-}
-
-private struct EventMediaThumbnail: View {
+private struct EventMediaImageContainer<Content: View>: View {
     let media: EventMedia
-    let remainingCount: Int?
-
-    var body: some View {
-        EventMediaImageLoader(media: media) { phase in
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-
-                switch phase {
-                case .loading:
-                    ProgressView()
-                        .controlSize(.small)
-                case .loaded(let image):
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 96, height: 96)
-                        .clipped()
-                case .failed:
-                    Image(systemName: "photo.badge.exclamationmark")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let remainingCount {
-                    Color.black.opacity(0.45)
-                    Text("+\(remainingCount)")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-        }
-        .frame(width: 96, height: 96)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-}
-
-private struct EventMediaPreviewImage: View {
-    let media: EventMedia
-    let maxWidth: CGFloat
-    let maxHeight: CGFloat
-
-    var body: some View {
-        EventMediaImageLoader(media: media) { phase in
-            Group {
-                switch phase {
-                case .loading:
-                    ProgressView("Loading image...")
-                        .frame(maxWidth: maxWidth, maxHeight: maxHeight)
-                case .loaded(let image):
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: maxWidth, maxHeight: maxHeight)
-                case .failed:
-                    ContentUnavailableView(
-                        "Unable to Load Image",
-                        systemImage: "photo.badge.exclamationmark",
-                        description: Text("This attachment could not be previewed right now.")
-                    )
-                    .frame(maxWidth: maxWidth, maxHeight: maxHeight)
-                }
-            }
-            .frame(width: maxWidth, height: maxHeight)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-    }
-}
-
-private enum EventMediaImagePhase {
-    case loading
-    case loaded(UIImage)
-    case failed
-}
-
-private struct EventMediaImageLoader<Content: View>: View {
-    let media: EventMedia
-    @ViewBuilder let content: (EventMediaImagePhase) -> Content
+    let failureForegroundColor: Color?
+    let content: (UIImage) -> Content
 
     @State private var phase: EventMediaImagePhase = .loading
 
+    init(
+        media: EventMedia,
+        failureForegroundColor: Color? = nil,
+        @ViewBuilder content: @escaping (UIImage) -> Content
+    ) {
+        self.media = media
+        self.failureForegroundColor = failureForegroundColor
+        self.content = content
+    }
+
     var body: some View {
-        content(phase)
-            .task(id: media.storagePath) {
-                await loadImage()
+        Group {
+            switch phase {
+            case .loading:
+                ProgressView()
+                    .controlSize(.regular)
+            case .loaded(let image):
+                content(image)
+            case .failed:
+                failureView
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: media.storagePath) {
+            await loadImage()
+        }
     }
 
     @MainActor
@@ -219,6 +154,21 @@ private struct EventMediaImageLoader<Content: View>: View {
             phase = .loaded(image)
         } catch {
             phase = .failed
+        }
+    }
+
+    @ViewBuilder
+    private var failureView: some View {
+        let view = ContentUnavailableView(
+            "Unable to Load Image",
+            systemImage: "photo.badge.exclamationmark",
+            description: Text("This attachment could not be previewed right now.")
+        )
+
+        if let failureForegroundColor {
+            view.foregroundStyle(failureForegroundColor)
+        } else {
+            view
         }
     }
 }
@@ -260,5 +210,87 @@ private enum EventMediaImageStore {
         }
 
         return String(payload).removingPercentEncoding?.data(using: .utf8)
+    }
+}
+
+private enum EventMediaImagePhase {
+    case loading
+    case loaded(UIImage)
+    case failed
+}
+
+private struct EventMediaPreviewImage: View {
+    let media: EventMedia
+
+    var body: some View {
+        EventMediaImageContainer(media: media, failureForegroundColor: .white) { image in
+            ZoomableEventMediaImage(image: image)
+        }
+    }
+}
+
+private struct ZoomableEventMediaImage: View {
+    let image: UIImage
+
+    @State private var zoomScale: CGFloat = 1
+    @State private var committedZoomScale: CGFloat = 1
+
+    private let minimumZoomScale: CGFloat = 1
+    private let maximumZoomScale: CGFloat = 4
+
+    var body: some View {
+        GeometryReader { proxy in
+            let fittedSize = image.size.aspectFit(in: proxy.size)
+            ScrollView([.horizontal, .vertical]) {
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(
+                        width: fittedSize.width * zoomScale,
+                        height: fittedSize.height * zoomScale
+                    )
+                    .frame(
+                        width: max(proxy.size.width, fittedSize.width * zoomScale),
+                        height: max(proxy.size.height, fittedSize.height * zoomScale)
+                    )
+            }
+            .scrollIndicators(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { value in
+                        zoomScale = clampedZoomScale(committedZoomScale * value)
+                    }
+                    .onEnded { value in
+                        let updatedZoomScale = clampedZoomScale(committedZoomScale * value)
+                        zoomScale = updatedZoomScale
+                        committedZoomScale = updatedZoomScale
+                    }
+            )
+            .onTapGesture(count: 2) {
+                let updatedZoomScale = zoomScale > minimumZoomScale ? minimumZoomScale : 2
+                zoomScale = updatedZoomScale
+                committedZoomScale = updatedZoomScale
+            }
+        }
+    }
+
+    private func clampedZoomScale(_ value: CGFloat) -> CGFloat {
+        min(max(value, minimumZoomScale), maximumZoomScale)
+    }
+}
+
+private extension CGSize {
+    func aspectFit(in container: CGSize) -> CGSize {
+        guard width > 0, height > 0, container.width > 0, container.height > 0 else {
+            return .zero
+        }
+
+        let widthRatio = container.width / width
+        let heightRatio = container.height / height
+        let scale = min(widthRatio, heightRatio)
+
+        return CGSize(width: width * scale, height: height * scale)
     }
 }

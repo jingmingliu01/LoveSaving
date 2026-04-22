@@ -140,6 +140,7 @@ struct JourneyView: View {
         .sheet(item: $editingEvent) { event in
             JourneyEventEditor(event: event)
                 .environmentObject(session)
+                .environmentObject(locationManager)
         }
         .sheet(item: $previewingEvent) { event in
             EventMediaPreviewSheet(event: event)
@@ -192,10 +193,12 @@ struct JourneyView: View {
 private struct JourneyEventEditor: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var session: AppSession
+    @EnvironmentObject private var locationManager: LocationManager
 
     let event: LoveEvent
 
     @State private var note: String
+    @State private var locationDraft: EditableEventLocation
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedImageData: Data?
     @State private var selectedImageExtension = "jpg"
@@ -204,6 +207,13 @@ private struct JourneyEventEditor: View {
     init(event: LoveEvent) {
         self.event = event
         _note = State(initialValue: event.note ?? "")
+        _locationDraft = State(
+            initialValue: EditableEventLocation(
+                addressText: event.location.addressText ?? "",
+                latitude: event.location.lat,
+                longitude: event.location.lng
+            )
+        )
     }
 
     private var hasExistingImage: Bool {
@@ -226,6 +236,14 @@ private struct JourneyEventEditor: View {
                         .lineLimit(3...6)
                         .accessibilityIdentifier("journey.edit.note")
                 }
+
+                EventLocationEditorSection(
+                    title: "Location",
+                    draft: $locationDraft,
+                    currentLocation: currentEditableLocation,
+                    accessibilityPrefix: "journey.edit.location",
+                    isDisabled: false
+                )
 
                 Section("Image") {
                     if isCurrentImageVisible {
@@ -281,6 +299,7 @@ private struct JourneyEventEditor: View {
                             let didSave = await session.updateJourneyEvent(
                                 event,
                                 note: note,
+                                location: locationDraft.eventLocation,
                                 imageData: selectedImageData,
                                 imageFileExtension: selectedImageExtension,
                                 removeExistingImage: removeCurrentImage || selectedImageData != nil
@@ -290,7 +309,7 @@ private struct JourneyEventEditor: View {
                             }
                         }
                     }
-                    .disabled(session.isBusy)
+                    .disabled(session.isBusy || locationDraft.eventLocation == nil)
                     .accessibilityIdentifier("journey.edit.save")
                 }
             }
@@ -316,5 +335,14 @@ private struct JourneyEventEditor: View {
                 }
             }
         }
+    }
+
+    private var currentEditableLocation: EditableEventLocation? {
+        guard let coordinate = locationManager.coordinate else { return nil }
+        return EditableEventLocation(
+            addressText: locationManager.addressText ?? "",
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude
+        )
     }
 }

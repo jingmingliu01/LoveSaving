@@ -673,7 +673,7 @@ final class FirebaseEventService: EventServicing {
         }
     }
 
-    func updateEvent(groupId: String, eventId: String, note: String?, media: [EventMedia]) async throws {
+    func updateEvent(groupId: String, eventId: String, note: String?, location: EventLocation, media: [EventMedia]) async throws {
         let eventRef = db.collection("groups")
             .document(groupId)
             .collection("events")
@@ -686,6 +686,11 @@ final class FirebaseEventService: EventServicing {
 
         try await eventRef.updateData([
             "note": firestoreNullable(note),
+            "location": [
+                "lat": location.lat,
+                "lng": location.lng,
+                "addressText": firestoreNullable(location.addressText)
+            ],
             "media": media.map { ["storagePath": $0.storagePath, "contentType": $0.contentType] },
             "updatedAt": FieldValue.serverTimestamp()
         ])

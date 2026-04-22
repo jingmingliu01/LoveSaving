@@ -135,7 +135,7 @@ private struct EventMediaImageContainer<Content: View>: View {
     @MainActor
     private func loadImage() async {
         let cacheKey = media.storagePath as NSString
-        if let cached = EventMediaImageLoader.imageCache.object(forKey: cacheKey) {
+        if let cached = EventMediaImageStore.imageCache.object(forKey: cacheKey) {
             phase = .loaded(cached)
             return
         }
@@ -143,27 +143,32 @@ private struct EventMediaImageContainer<Content: View>: View {
         phase = .loading
 
         do {
-            let data = try await imageData(for: media)
+            let data = try await EventMediaImageStore.imageData(for: media)
             guard let image = UIImage(data: data) else {
                 phase = .failed
                 return
             }
 
-            EventMediaImageLoader.imageCache.setObject(image, forKey: cacheKey)
+            EventMediaImageStore.imageCache.setObject(image, forKey: cacheKey)
             phase = .loaded(image)
         } catch {
             phase = .failed
         }
     }
+}
 
-    private func imageData(for media: EventMedia) async throws -> Data {
-        if let inlineData = EventMediaImageLoader.decodeInlineDataURL(media.storagePath) {
+private enum EventMediaImageStore {
+    static let imageCache = NSCache<NSString, UIImage>()
+    static let maxDownloadBytes: Int64 = 10 * 1024 * 1024
+
+    static func imageData(for media: EventMedia) async throws -> Data {
+        if let inlineData = Self.decodeInlineDataURL(media.storagePath) {
             return inlineData
         }
 
         let reference = Storage.storage().reference(withPath: media.storagePath)
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-            reference.getData(maxSize: EventMediaImageLoader.maxDownloadBytes) { data, error in
+            reference.getData(maxSize: Self.maxDownloadBytes) { data, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else if let data {
@@ -175,13 +180,7 @@ private struct EventMediaImageContainer<Content: View>: View {
         }
     }
 
-}
-
-private enum EventMediaImageLoader {
-    static let imageCache = NSCache<NSString, UIImage>()
-    static let maxDownloadBytes: Int64 = 10 * 1024 * 1024
-
-    static func decodeInlineDataURL(_ storagePath: String) -> Data? {
+    private static func decodeInlineDataURL(_ storagePath: String) -> Data? {
         guard storagePath.hasPrefix("data:"),
               let separatorIndex = storagePath.firstIndex(of: ",") else {
             return nil

@@ -1,6 +1,5 @@
 import Foundation
 import Combine
-import CoreLocation
 
 @MainActor
 final class HomeViewModel: ObservableObject {
@@ -54,7 +53,7 @@ final class HomeViewModel: ObservableObject {
         debounceTask?.cancel()
     }
 
-    func submit(using session: AppSession, coordinate: (lat: Double, lng: Double)?, addressText: String?) async {
+    func submit(using session: AppSession, location: EventLocation?) async {
         guard runtimeMode == .normal else {
             resetBurst()
             didTutorialSubmit = true
@@ -67,8 +66,7 @@ final class HomeViewModel: ObservableObject {
             note: note,
             imageData: selectedImageData,
             imageFileExtension: selectedImageExtension,
-            coordinate: coordinate.map { .init(latitude: $0.lat, longitude: $0.lng) },
-            addressText: addressText
+            location: location
         )
         if didSubmit {
             resetBurst()

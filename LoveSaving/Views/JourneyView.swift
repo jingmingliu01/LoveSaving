@@ -46,19 +46,22 @@ struct JourneyView: View {
                                     .foregroundStyle(event.delta >= 0 ? .green : .red)
                                     .font(.subheadline.weight(.semibold))
                                 
-                                if !event.media.isEmpty {
-                                    Button {
+                                if let previewMedia = event.media.first {
+                                    EventMediaInlinePreview(
+                                        media: previewMedia,
+                                        additionalImageCount: max(event.media.count - 1, 0)
+                                    ) {
                                         previewingEvent = event
-                                    } label: {
-                                        Label(
-                                            "\(event.media.count) image\(event.media.count == 1 ? "" : "s") attached",
-                                            systemImage: "photo"
-                                        )
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
                                     }
-                                    .buttonStyle(.plain)
                                     .accessibilityIdentifier("journey.imagePreview.open")
+
+                                    Text(
+                                        event.media.count == 1
+                                            ? "Image preview"
+                                            : "\(event.media.count) images attached"
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                                 }
 
                                 HStack {

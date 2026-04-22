@@ -2,6 +2,45 @@ import FirebaseStorage
 import SwiftUI
 import UIKit
 
+struct EventMediaInlinePreview: View {
+    let media: EventMedia
+    let additionalImageCount: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                EventMediaImageContainer(media: media) { image in
+                    Image(uiImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(maxWidth: .infinity, minHeight: 150, maxHeight: 220)
+                .padding(12)
+                .background(Color.secondary.opacity(0.08))
+
+                if additionalImageCount > 0 {
+                    Text("+\(additionalImageCount)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.65), in: Capsule())
+                        .padding(12)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.15))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct EventMediaPreviewSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -43,7 +82,8 @@ private struct EventMediaPreviewPage: View {
             Color.black.ignoresSafeArea()
 
             EventMediaPreviewImage(media: media)
-                .padding()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
 
             if totalCount > 1 {
                 Text("\(index + 1) / \(totalCount)")
@@ -58,40 +98,25 @@ private struct EventMediaPreviewPage: View {
     }
 }
 
-private struct EventMediaPreviewImage: View {
-    private enum Phase {
-        case loading
-        case loaded(UIImage)
-        case failed
-    }
-
-    private static let imageCache = NSCache<NSString, UIImage>()
-    private static let maxDownloadBytes: Int64 = 10 * 1024 * 1024
-
+private struct EventMediaImageContainer<Content: View>: View {
     let media: EventMedia
+    let content: (UIImage) -> Content
 
-    @State private var phase: Phase = .loading
+    @State private var phase: EventMediaImagePhase = .loading
+
+    init(media: EventMedia, @ViewBuilder content: @escaping (UIImage) -> Content) {
+        self.media = media
+        self.content = content
+    }
 
     var body: some View {
         Group {
             switch phase {
             case .loading:
-                ProgressView("Loading image...")
-                    .tint(.white)
-                    .foregroundStyle(.white)
+                ProgressView()
+                    .controlSize(.regular)
             case .loaded(let image):
-                GeometryReader { proxy in
-                    ScrollView([.horizontal, .vertical]) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(
-                                minWidth: proxy.size.width,
-                                minHeight: proxy.size.height
-                            )
-                    }
-                    .scrollIndicators(.hidden)
-                }
+                content(image)
             case .failed:
                 ContentUnavailableView(
                     "Unable to Load Image",
@@ -110,7 +135,7 @@ private struct EventMediaPreviewImage: View {
     @MainActor
     private func loadImage() async {
         let cacheKey = media.storagePath as NSString
-        if let cached = Self.imageCache.object(forKey: cacheKey) {
+        if let cached = EventMediaImageLoader.imageCache.object(forKey: cacheKey) {
             phase = .loaded(cached)
             return
         }
@@ -124,7 +149,7 @@ private struct EventMediaPreviewImage: View {
                 return
             }
 
-            Self.imageCache.setObject(image, forKey: cacheKey)
+            EventMediaImageLoader.imageCache.setObject(image, forKey: cacheKey)
             phase = .loaded(image)
         } catch {
             phase = .failed
@@ -132,13 +157,13 @@ private struct EventMediaPreviewImage: View {
     }
 
     private func imageData(for media: EventMedia) async throws -> Data {
-        if let inlineData = Self.decodeInlineDataURL(media.storagePath) {
+        if let inlineData = EventMediaImageLoader.decodeInlineDataURL(media.storagePath) {
             return inlineData
         }
 
         let reference = Storage.storage().reference(withPath: media.storagePath)
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-            reference.getData(maxSize: Self.maxDownloadBytes) { data, error in
+            reference.getData(maxSize: EventMediaImageLoader.maxDownloadBytes) { data, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else if let data {
@@ -150,7 +175,13 @@ private struct EventMediaPreviewImage: View {
         }
     }
 
-    private static func decodeInlineDataURL(_ storagePath: String) -> Data? {
+}
+
+private enum EventMediaImageLoader {
+    static let imageCache = NSCache<NSString, UIImage>()
+    static let maxDownloadBytes: Int64 = 10 * 1024 * 1024
+
+    static func decodeInlineDataURL(_ storagePath: String) -> Data? {
         guard storagePath.hasPrefix("data:"),
               let separatorIndex = storagePath.firstIndex(of: ",") else {
             return nil
@@ -164,5 +195,87 @@ private struct EventMediaPreviewImage: View {
         }
 
         return String(payload).removingPercentEncoding?.data(using: .utf8)
+    }
+}
+
+private enum EventMediaImagePhase {
+    case loading
+    case loaded(UIImage)
+    case failed
+}
+
+private struct EventMediaPreviewImage: View {
+    let media: EventMedia
+
+    var body: some View {
+        EventMediaImageContainer(media: media) { image in
+            ZoomableEventMediaImage(image: image)
+        }
+    }
+}
+
+private struct ZoomableEventMediaImage: View {
+    let image: UIImage
+
+    @State private var zoomScale: CGFloat = 1
+    @State private var committedZoomScale: CGFloat = 1
+
+    private let minimumZoomScale: CGFloat = 1
+    private let maximumZoomScale: CGFloat = 4
+
+    var body: some View {
+        GeometryReader { proxy in
+            let fittedSize = image.size.aspectFit(in: proxy.size)
+            ScrollView([.horizontal, .vertical]) {
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(
+                        width: fittedSize.width * zoomScale,
+                        height: fittedSize.height * zoomScale
+                    )
+                    .frame(
+                        width: max(proxy.size.width, fittedSize.width * zoomScale),
+                        height: max(proxy.size.height, fittedSize.height * zoomScale)
+                    )
+            }
+            .scrollIndicators(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { value in
+                        zoomScale = clampedZoomScale(committedZoomScale * value)
+                    }
+                    .onEnded { value in
+                        let updatedZoomScale = clampedZoomScale(committedZoomScale * value)
+                        zoomScale = updatedZoomScale
+                        committedZoomScale = updatedZoomScale
+                    }
+            )
+            .onTapGesture(count: 2) {
+                let updatedZoomScale = zoomScale > minimumZoomScale ? minimumZoomScale : 2
+                zoomScale = updatedZoomScale
+                committedZoomScale = updatedZoomScale
+            }
+        }
+    }
+
+    private func clampedZoomScale(_ value: CGFloat) -> CGFloat {
+        min(max(value, minimumZoomScale), maximumZoomScale)
+    }
+}
+
+private extension CGSize {
+    func aspectFit(in container: CGSize) -> CGSize {
+        guard width > 0, height > 0, container.width > 0, container.height > 0 else {
+            return .zero
+        }
+
+        let widthRatio = container.width / width
+        let heightRatio = container.height / height
+        let scale = min(widthRatio, heightRatio)
+
+        return CGSize(width: width * scale, height: height * scale)
     }
 }

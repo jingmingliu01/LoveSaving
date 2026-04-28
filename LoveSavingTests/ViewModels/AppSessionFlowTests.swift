@@ -50,8 +50,10 @@ final class AppSessionFlowTests: XCTestCase {
 
     func testAcceptInviteLinksGroup() async {
         let session = makeSession(scenario: .unlinked).session
-        await waitUntil("auth observer loads inbound invite") {
-            session.isSignedIn && !session.inboundInvites.isEmpty
+        await waitUntil("auth observer loads inbound invite", timeoutNanoseconds: 15_000_000_000) {
+            session.hasResolvedInitialAuthState &&
+            session.isSignedIn &&
+            !session.inboundInvites.isEmpty
         }
 
         guard let invite = session.inboundInvites.first else {

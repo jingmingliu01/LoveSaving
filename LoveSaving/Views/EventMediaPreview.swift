@@ -100,12 +100,18 @@ private struct EventMediaPreviewPage: View {
 
 private struct EventMediaImageContainer<Content: View>: View {
     let media: EventMedia
+    let failureForegroundColor: Color?
     let content: (UIImage) -> Content
 
     @State private var phase: EventMediaImagePhase = .loading
 
-    init(media: EventMedia, @ViewBuilder content: @escaping (UIImage) -> Content) {
+    init(
+        media: EventMedia,
+        failureForegroundColor: Color? = nil,
+        @ViewBuilder content: @escaping (UIImage) -> Content
+    ) {
         self.media = media
+        self.failureForegroundColor = failureForegroundColor
         self.content = content
     }
 
@@ -118,12 +124,7 @@ private struct EventMediaImageContainer<Content: View>: View {
             case .loaded(let image):
                 content(image)
             case .failed:
-                ContentUnavailableView(
-                    "Unable to Load Image",
-                    systemImage: "photo.badge.exclamationmark",
-                    description: Text("This attachment could not be previewed right now.")
-                )
-                .foregroundStyle(.white)
+                failureView
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -153,6 +154,21 @@ private struct EventMediaImageContainer<Content: View>: View {
             phase = .loaded(image)
         } catch {
             phase = .failed
+        }
+    }
+
+    @ViewBuilder
+    private var failureView: some View {
+        let view = ContentUnavailableView(
+            "Unable to Load Image",
+            systemImage: "photo.badge.exclamationmark",
+            description: Text("This attachment could not be previewed right now.")
+        )
+
+        if let failureForegroundColor {
+            view.foregroundStyle(failureForegroundColor)
+        } else {
+            view
         }
     }
 }
@@ -207,7 +223,7 @@ private struct EventMediaPreviewImage: View {
     let media: EventMedia
 
     var body: some View {
-        EventMediaImageContainer(media: media) { image in
+        EventMediaImageContainer(media: media, failureForegroundColor: .white) { image in
             ZoomableEventMediaImage(image: image)
         }
     }

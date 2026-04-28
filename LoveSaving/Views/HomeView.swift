@@ -10,6 +10,8 @@ struct HomeView: View {
     @StateObject private var viewModel: HomeViewModel
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var composerLocation = EditableEventLocation()
+    @State private var tapFeedbackState = HomeTapFeedbackState.rest
+    @State private var tapFeedbackTask: Task<Void, Never>?
     private let tutorialStep: OnboardingPart2Step?
 
     @MainActor
@@ -60,19 +62,17 @@ struct HomeView: View {
                 .tutorialHidden(viewModel.isTutorialMode)
 
                 Button {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) {
-                        viewModel.registerTap()
-                    }
+                    triggerTapFeedback(for: viewModel.type)
+                    viewModel.registerTap()
                 } label: {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .fill(Color.clear)
                         .frame(width: 116, height: 116)
                         .overlay {
-                            Image(systemName: viewModel.type == .deposit ? "heart.fill" : "heart.slash.fill")
-                                .font(.system(size: 70))
-                                .foregroundStyle(viewModel.type == .deposit ? .pink : .red)
-                                .scaleEffect(viewModel.tapCount > 0 ? 1.06 : 1.0)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                            HomeTapButtonFeedbackLabel(
+                                type: viewModel.type,
+                                state: tapFeedbackState
+                            )
                         }
                         .tutorialTarget(.tapButton)
                 }
@@ -239,6 +239,9 @@ struct HomeView: View {
                 composerLocation = EditableEventLocation()
             }
         }
+        .onDisappear {
+            tapFeedbackTask?.cancel()
+        }
     }
 
     private var tutorialTitlePlaceholder: some View {
@@ -292,6 +295,60 @@ struct HomeView: View {
     private func seedComposerLocationIfNeeded() {
         guard composerLocation.isBlank, let currentEditableLocation else { return }
         composerLocation = currentEditableLocation
+    }
+
+    private func triggerTapFeedback(for type: EventType) {
+        let style = HomeTapFeedbackStyle.forType(type)
+        tapFeedbackTask?.cancel()
+        tapFeedbackState = style.preImpactState
+
+        withAnimation(style.impactAnimation) {
+            tapFeedbackState = style.impactState
+        }
+
+        tapFeedbackTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: style.impactDuration.nanoseconds)
+            guard !Task.isCancelled else { return }
+
+            withAnimation(style.settleAnimation) {
+                tapFeedbackState = .rest
+            }
+        }
+    }
+}
+
+private struct HomeTapButtonFeedbackLabel: View {
+    let type: EventType
+    let state: HomeTapFeedbackState
+
+    private var tint: Color {
+        type == .deposit ? .pink : .red
+    }
+
+    private var symbolName: String {
+        type == .deposit ? "heart.fill" : "heart.slash.fill"
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(tint.opacity(state.plateOpacity))
+                .frame(width: 92, height: 92)
+                .scaleEffect(state.plateScale)
+
+            Circle()
+                .stroke(tint.opacity(state.pulseOpacity), lineWidth: 7)
+                .frame(width: 86, height: 86)
+                .scaleEffect(state.pulseScale)
+
+            Image(systemName: symbolName)
+                .font(.system(size: 70))
+                .foregroundStyle(tint)
+                .scaleEffect(state.symbolScale)
+                .rotationEffect(.degrees(state.rotationDegrees))
+                .offset(x: state.xOffset, y: state.yOffset)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 
@@ -406,6 +463,104 @@ struct EventLocationEditorSection: View {
     }
 }
 
+private struct HomeTapFeedbackState {
+    var symbolScale: CGFloat = 1
+    var xOffset: CGFloat = 0
+    var yOffset: CGFloat = 0
+    var rotationDegrees: Double = 0
+    var pulseScale: CGFloat = 0.82
+    var pulseOpacity: Double = 0
+    var plateScale: CGFloat = 0.92
+    var plateOpacity: Double = 0
+
+    static let rest = HomeTapFeedbackState()
+}
+
+// Keep the tap feel tunable in one place without touching Home event logic.
+private struct HomeTapFeedbackStyle {
+    let compression: CGFloat
+    let scaleBoost: CGFloat
+    let pressDepth: CGFloat
+    let lift: CGFloat
+    let horizontalKick: CGFloat
+    let twistDegrees: Double
+    let pulseScale: CGFloat
+    let pulseOpacity: Double
+    let plateOpacity: Double
+    let impactDuration: TimeInterval
+    let impactBounce: Double
+    let settleDuration: TimeInterval
+
+    var impactAnimation: Animation {
+        .spring(duration: impactDuration, bounce: impactBounce)
+    }
+
+    var settleAnimation: Animation {
+        .easeOut(duration: settleDuration)
+    }
+
+    var preImpactState: HomeTapFeedbackState {
+        HomeTapFeedbackState(
+            symbolScale: 1 - compression,
+            xOffset: horizontalKick == 0 ? 0 : -horizontalKick * 0.55,
+            yOffset: pressDepth,
+            rotationDegrees: twistDegrees * -0.35,
+            pulseScale: 0.84,
+            pulseOpacity: pulseOpacity * 0.35,
+            plateScale: 0.92,
+            plateOpacity: plateOpacity * 0.6
+        )
+    }
+
+    var impactState: HomeTapFeedbackState {
+        HomeTapFeedbackState(
+            symbolScale: 1 + scaleBoost,
+            xOffset: horizontalKick,
+            yOffset: -lift,
+            rotationDegrees: twistDegrees,
+            pulseScale: pulseScale,
+            pulseOpacity: pulseOpacity,
+            plateScale: 1.02,
+            plateOpacity: plateOpacity
+        )
+    }
+
+    static func forType(_ type: EventType) -> HomeTapFeedbackStyle {
+        switch type {
+        case .deposit:
+            return HomeTapFeedbackStyle(
+                compression: 0.08,
+                scaleBoost: 0.18,
+                pressDepth: 4,
+                lift: 8,
+                horizontalKick: 0,
+                twistDegrees: -8,
+                pulseScale: 1.26,
+                pulseOpacity: 0.22,
+                plateOpacity: 0.16,
+                impactDuration: 0.18,
+                impactBounce: 0.42,
+                settleDuration: 0.14
+            )
+        case .withdraw:
+            return HomeTapFeedbackStyle(
+                compression: 0.10,
+                scaleBoost: 0.08,
+                pressDepth: 3,
+                lift: 2,
+                horizontalKick: 5,
+                twistDegrees: 8,
+                pulseScale: 1.12,
+                pulseOpacity: 0.16,
+                plateOpacity: 0.12,
+                impactDuration: 0.16,
+                impactBounce: 0.24,
+                settleDuration: 0.12
+            )
+        }
+    }
+}
+
 private extension String {
     var trimmedText: String {
         trimmingCharacters(in: .whitespacesAndNewlines)
@@ -414,5 +569,11 @@ private extension String {
     var nilIfEmpty: String? {
         let trimmed = trimmedText
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private extension TimeInterval {
+    var nanoseconds: UInt64 {
+        UInt64((self * 1_000_000_000).rounded())
     }
 }

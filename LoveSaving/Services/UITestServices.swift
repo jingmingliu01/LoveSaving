@@ -689,20 +689,120 @@ final class UITestMessagingService: MessagingServicing {
 @MainActor
 final class UITestAIInsightsAvailabilityService: AIInsightsAvailabilityServicing {
     func fetchAvailability() async -> AIInsightsAvailability {
-        .unavailable(reason: "AI Insights backend is disabled in UI test mode.")
+        .available(
+            AIInsightsCapabilities(
+                enabled: true,
+                streamingSupported: true,
+                multimodalSupported: false,
+                environment: "ui-test",
+                primaryModelProvider: "openai",
+                primaryTextModel: "gpt-5.4-nano",
+                primaryMultimodalModel: "gpt-5.4-nano",
+                status: "ok",
+                reason: nil
+            )
+        )
     }
 }
 
-struct UITestAIInsightsService: AIInsightsServicing {
-    func fetchThreads() async throws -> [AIInsightThread] { [] }
-    func fetchMessages(chatId: String) async throws -> [AIInsightMessage] { [] }
+@MainActor
+final class UITestAIInsightsService: AIInsightsServicing {
+    private var threads: [AIInsightThread] = [
+        AIInsightThread(
+            chatId: "ui-test-thread-recent",
+            title: "Repairing a quiet evening",
+            lastMessagePreview: "Start with one small repair move, then leave room for an honest answer.",
+            lastMessageRole: "assistant",
+            lastMessageAt: Date(timeIntervalSince1970: 1_775_000_060),
+            contextGroupId: "group_1",
+            groupNameAtCreation: "LoveSaving Group",
+            isDeleted: false
+        )
+    ]
+
+    private var messagesByThread: [String: [AIInsightMessage]] = [
+        "ui-test-thread-recent": [
+            AIInsightMessage(
+                messageId: "ui-test-message-user-1",
+                role: "user",
+                messageType: "chat",
+                content: "We were both tired last night. What is a low-pressure way to reset the mood?",
+                createdAt: Date(timeIntervalSince1970: 1_775_000_000)
+            ),
+            AIInsightMessage(
+                messageId: "ui-test-message-assistant-1",
+                role: "assistant",
+                messageType: "chat",
+                content: "Start with one concrete sentence: name the moment, own your part, and ask one gentle question. Keep it short enough that it feels easy to answer.",
+                createdAt: Date(timeIntervalSince1970: 1_775_000_060)
+            )
+        ]
+    ]
+
+    func fetchThreads() async throws -> [AIInsightThread] {
+        threads.filter { !$0.isDeleted }
+    }
+
+    func fetchMessages(chatId: String) async throws -> [AIInsightMessage] {
+        messagesByThread[chatId, default: []]
+    }
+
     func streamReply(chatId: String, contextGroupId: String, message: String) -> AsyncThrowingStream<AIInsightStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            continuation.finish()
+            Task { @MainActor in
+                messagesByThread[chatId, default: []].append(
+                    AIInsightMessage(
+                        messageId: UUID().uuidString.lowercased(),
+                        role: "user",
+                        messageType: "chat",
+                        content: message,
+                        createdAt: Date()
+                    )
+                )
+                continuation.yield(.metadata(chatId: chatId, uid: "owner", groupId: contextGroupId))
+
+                let deltas = [
+                    "Try naming one specific thing you appreciated, ",
+                    "then pause. ",
+                    "A small, direct repair ",
+                    "is easier to receive than a long explanation."
+                ]
+                for delta in deltas {
+                    continuation.yield(.delta(delta))
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                }
+
+                let reply = deltas.joined()
+                messagesByThread[chatId, default: []].append(
+                    AIInsightMessage(
+                        messageId: UUID().uuidString.lowercased(),
+                        role: "assistant",
+                        messageType: "chat",
+                        content: reply,
+                        createdAt: Date()
+                    )
+                )
+                if let index = threads.firstIndex(where: { $0.chatId == chatId }) {
+                    threads[index].lastMessagePreview = reply
+                    threads[index].lastMessageRole = "assistant"
+                    threads[index].lastMessageAt = Date()
+                }
+                continuation.yield(.done(title: "Repairing a quiet evening"))
+                continuation.finish()
+            }
         }
     }
+
     func renameThread(chatId: String, title: String) async throws -> AIInsightRenameResult {
-        AIInsightRenameResult(chatId: chatId, title: title)
+        if let index = threads.firstIndex(where: { $0.chatId == chatId }) {
+            threads[index].title = title
+        }
+        return AIInsightRenameResult(chatId: chatId, title: title)
     }
-    func softDeleteThread(chatId: String) async throws {}
+
+    func softDeleteThread(chatId: String) async throws {
+        if let index = threads.firstIndex(where: { $0.chatId == chatId }) {
+            threads[index].isDeleted = true
+        }
+    }
 }

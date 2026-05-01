@@ -37,6 +37,51 @@ final class AIInsightsViewModelTests: XCTestCase {
         }
     }
 
+    func testSendMessagePublishesIntermediateStreamingState() async {
+        let service = SlowStreamingAIInsightsServiceStub()
+        let viewModel = AIInsightsViewModel()
+        let session = makeSession(service: service)
+        viewModel.configureIfNeeded(service: service)
+        await viewModel.refreshThreads(selectMostRecent: true)
+
+        viewModel.composerText = "Can I see streaming?"
+        let sendTask = Task {
+            await viewModel.sendMessage(using: session)
+        }
+
+        await assertEventually(timeoutNanoseconds: 1_000_000_000) {
+            viewModel.isSending &&
+            viewModel.messages.last?.role == "assistant" &&
+            viewModel.messages.last?.content == "First visible chunk. "
+        }
+        XCTAssertFalse(viewModel.messages.last?.content.contains("Second visible chunk.") ?? false)
+
+        await sendTask.value
+        XCTAssertEqual(viewModel.messages.last?.content, "First visible chunk. Second visible chunk.")
+    }
+
+    func testFailedSendOffersRetryAndRemovesEmptyAssistantPlaceholder() async {
+        let service = FailsFirstStreamAIInsightsServiceStub()
+        let viewModel = AIInsightsViewModel()
+        let session = makeSession(service: service)
+        viewModel.configureIfNeeded(service: service)
+        await viewModel.refreshThreads(selectMostRecent: true)
+
+        viewModel.composerText = "How do I repair the tone tonight?"
+        await viewModel.sendMessage(using: session)
+
+        XCTAssertEqual(viewModel.failedSendDraft, "How do I repair the tone tonight?")
+        XCTAssertTrue(viewModel.messages.contains(where: { $0.role == "user" && $0.content == "How do I repair the tone tonight?" }))
+        XCTAssertFalse(viewModel.messages.contains(where: { $0.role == "assistant" && $0.content.isEmpty }))
+
+        await viewModel.retryLastFailedMessage(using: session)
+
+        await assertEventually(timeoutNanoseconds: 3_000_000_000) {
+            viewModel.failedSendDraft == nil &&
+            viewModel.messages.contains(where: { $0.role == "assistant" && $0.content.contains("Start small tonight") })
+        }
+    }
+
     func testRenameThreadUpdatesTitle() async {
         let service = AIInsightsServiceStub()
         let viewModel = AIInsightsViewModel()
@@ -249,5 +294,121 @@ private final class FlakyAIInsightsServiceStub: AIInsightsServicing {
 
     func softDeleteThread(chatId: String) async throws {
         try await backing.softDeleteThread(chatId: chatId)
+    }
+}
+
+@MainActor
+private final class FailsFirstStreamAIInsightsServiceStub: AIInsightsServicing {
+    private let backing = AIInsightsServiceStub()
+    private var streamAttempts = 0
+
+    func fetchThreads() async throws -> [AIInsightThread] {
+        try await backing.fetchThreads()
+    }
+
+    func fetchMessages(chatId: String) async throws -> [AIInsightMessage] {
+        try await backing.fetchMessages(chatId: chatId)
+    }
+
+    func streamReply(chatId: String, contextGroupId: String, message: String) -> AsyncThrowingStream<AIInsightStreamEvent, Error> {
+        streamAttempts += 1
+        if streamAttempts == 1 {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: AIInsightsClientError.httpStatus(503))
+            }
+        }
+
+        return backing.streamReply(chatId: chatId, contextGroupId: contextGroupId, message: message)
+    }
+
+    func renameThread(chatId: String, title: String) async throws -> AIInsightRenameResult {
+        try await backing.renameThread(chatId: chatId, title: title)
+    }
+
+    func softDeleteThread(chatId: String) async throws {
+        try await backing.softDeleteThread(chatId: chatId)
+    }
+}
+
+@MainActor
+private final class SlowStreamingAIInsightsServiceStub: AIInsightsServicing {
+    private var threads: [AIInsightThread] = [
+        AIInsightThread(
+            chatId: "thread-streaming",
+            title: "Streaming proof",
+            lastMessagePreview: "Existing message",
+            lastMessageRole: "assistant",
+            lastMessageAt: Date(timeIntervalSince1970: 1_743_473_407),
+            contextGroupId: "group_1",
+            groupNameAtCreation: "LoveSaving Group",
+            isDeleted: false
+        )
+    ]
+    private var messagesByThread: [String: [AIInsightMessage]] = [
+        "thread-streaming": [
+            AIInsightMessage(
+                messageId: "streaming-existing",
+                role: "assistant",
+                messageType: "chat",
+                content: "Existing message",
+                createdAt: Date(timeIntervalSince1970: 1_743_473_407)
+            )
+        ]
+    ]
+
+    func fetchThreads() async throws -> [AIInsightThread] {
+        threads
+    }
+
+    func fetchMessages(chatId: String) async throws -> [AIInsightMessage] {
+        messagesByThread[chatId, default: []]
+    }
+
+    func streamReply(chatId: String, contextGroupId: String, message: String) -> AsyncThrowingStream<AIInsightStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task { @MainActor in
+                messagesByThread[chatId, default: []].append(
+                    AIInsightMessage(
+                        messageId: "streaming-user",
+                        role: "user",
+                        messageType: "chat",
+                        content: message,
+                        createdAt: Date()
+                    )
+                )
+
+                continuation.yield(.metadata(chatId: chatId, uid: "owner", groupId: contextGroupId))
+                continuation.yield(.delta("First visible chunk. "))
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                continuation.yield(.delta("Second visible chunk."))
+
+                let reply = "First visible chunk. Second visible chunk."
+                messagesByThread[chatId, default: []].append(
+                    AIInsightMessage(
+                        messageId: "streaming-assistant",
+                        role: "assistant",
+                        messageType: "chat",
+                        content: reply,
+                        createdAt: Date()
+                    )
+                )
+                if let index = threads.firstIndex(where: { $0.chatId == chatId }) {
+                    threads[index].lastMessagePreview = reply
+                    threads[index].lastMessageRole = "assistant"
+                    threads[index].lastMessageAt = Date()
+                }
+
+                continuation.yield(.done(title: "Streaming proof"))
+                continuation.finish()
+            }
+        }
+    }
+
+    func renameThread(chatId: String, title: String) async throws -> AIInsightRenameResult {
+        AIInsightRenameResult(chatId: chatId, title: title)
+    }
+
+    func softDeleteThread(chatId: String) async throws {
+        threads.removeAll { $0.chatId == chatId }
     }
 }

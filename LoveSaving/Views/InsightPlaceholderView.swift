@@ -137,6 +137,7 @@ private struct AIInsightsChatSurface: View {
     @ObservedObject var session: AppSession
     @ObservedObject var viewModel: AIInsightsViewModel
     @Binding var lastScrolledThreadID: String?
+    @State private var pendingScrollWorkItem: DispatchWorkItem?
     let openThreadList: () -> Void
 
     var body: some View {
@@ -164,11 +165,15 @@ private struct AIInsightsChatSurface: View {
                             } else {
                                 AIInsightsEmptyState()
                             }
+
+                            Color.clear
+                                .frame(height: AIInsightsScrollAnchor.bottomSpacerHeight)
+                                .id(AIInsightsScrollAnchor.bottom)
                         }
                         .frame(width: contentWidth, alignment: .leading)
                         .padding(.horizontal, 18)
-                        .padding(.top, 20)
-                        .padding(.bottom, 120)
+                        .padding(.top, 28)
+                        .padding(.bottom, 16)
                     }
                     .id(viewModel.selectedThreadID ?? "empty-thread")
                     .background(Color(uiColor: .systemGroupedBackground))
@@ -187,20 +192,20 @@ private struct AIInsightsChatSurface: View {
                         lastScrolledThreadID = nil
                     }
                     .onChange(of: viewModel.messages) { _, messages in
-                        guard let lastID = messages.last?.id else { return }
+                        guard !messages.isEmpty else { return }
 
                         if viewModel.selectedThreadID != lastScrolledThreadID {
                             lastScrolledThreadID = viewModel.selectedThreadID
-                            DispatchQueue.main.async {
-                                proxy.scrollTo(lastID, anchor: .bottom)
-                            }
+                            scrollToBottom(proxy)
                             return
                         }
 
                         guard viewModel.isSending else { return }
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(lastID, anchor: .bottom)
-                        }
+                        scrollToBottom(proxy, animated: true)
+                    }
+                    .onChange(of: viewModel.isSending) { _, isSending in
+                        guard !isSending, !viewModel.messages.isEmpty else { return }
+                        scrollToBottom(proxy, animated: true)
                     }
                 }
             }
@@ -209,12 +214,37 @@ private struct AIInsightsChatSurface: View {
                 AIInsightsComposer(
                     text: $viewModel.composerText,
                     isSending: viewModel.isSending,
+                    failedDraft: viewModel.failedSendDraft,
+                    retry: {
+                        Task { await viewModel.retryLastFailedMessage(using: session) }
+                    },
                     send: {
                         Task { await viewModel.sendMessage(using: session) }
                     }
                 )
             }
+            .onDisappear {
+                pendingScrollWorkItem?.cancel()
+                pendingScrollWorkItem = nil
+            }
         }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = false) {
+        pendingScrollWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem {
+            if animated {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(AIInsightsScrollAnchor.bottom, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(AIInsightsScrollAnchor.bottom, anchor: .bottom)
+            }
+        }
+
+        pendingScrollWorkItem = workItem
+        DispatchQueue.main.async(execute: workItem)
     }
 
     private var header: some View {
@@ -248,6 +278,11 @@ private struct AIInsightsChatSurface: View {
             }
         }
     }
+}
+
+private enum AIInsightsScrollAnchor {
+    static let bottom = "ai-insights-scroll-bottom"
+    static let bottomSpacerHeight: CGFloat = 156
 }
 
 private struct AIInsightsCheckingView: View {
@@ -328,6 +363,7 @@ private struct AIInsightsMessageList: View {
                     isStreamingPlaceholder: isSending && !message.isUser && message.content.isEmpty,
                     rowWidth: rowWidth
                 )
+                    .equatable()
                     .id(message.id)
             }
         }
@@ -335,7 +371,7 @@ private struct AIInsightsMessageList: View {
     }
 }
 
-private struct AIInsightsMessageBubble: View {
+private struct AIInsightsMessageBubble: View, Equatable {
     let message: AIInsightMessage
     let isStreamingPlaceholder: Bool
     let rowWidth: CGFloat
@@ -353,8 +389,8 @@ private struct AIInsightsMessageBubble: View {
         .frame(width: rowWidth, alignment: .leading)
     }
 
-    private var bubbleBackground: some ShapeStyle {
-        message.isUser ? AnyShapeStyle(Color.pink.opacity(0.14)) : AnyShapeStyle(Color(uiColor: .secondarySystemBackground))
+    private var bubbleBackground: Color {
+        message.isUser ? Color.pink.opacity(0.14) : Color(uiColor: .secondarySystemBackground)
     }
 
     private var bubbleContent: some View {
@@ -367,9 +403,7 @@ private struct AIInsightsMessageBubble: View {
                 ProgressView()
                     .controlSize(.small)
             } else {
-                Text(message.content)
-                    .font(.body)
-                    .foregroundStyle(.primary)
+                AIInsightsMessageText(content: message.content)
             }
 
             Text(AppDisplayTime.estDateTime(message.createdAt))
@@ -378,25 +412,65 @@ private struct AIInsightsMessageBubble: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(bubbleBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(bubbleBackground, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: min(320, rowWidth * 0.84), alignment: .leading)
+    }
+}
+
+private struct AIInsightsMessageText: View {
+    let content: String
+
+    var body: some View {
+        if let markdown = try? AttributedString(
+            markdown: content,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            Text(markdown)
+                .font(.body)
+                .foregroundStyle(.primary)
+        } else {
+            Text(content)
+                .font(.body)
+                .foregroundStyle(.primary)
+        }
     }
 }
 
 private struct AIInsightsComposer: View {
     @Binding var text: String
     let isSending: Bool
+    let failedDraft: String?
+    let retry: () -> Void
     let send: () -> Void
 
     var body: some View {
         VStack(spacing: 10) {
             Divider()
 
+            if let failedDraft, !failedDraft.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Label("Message failed", systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.red)
+
+                    Text(failedDraft)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+
+                    Button("Retry", action: retry)
+                        .font(.footnote.weight(.semibold))
+                        .disabled(isSending)
+                }
+                .padding(.horizontal, 16)
+            }
+
             HStack(alignment: .bottom, spacing: 12) {
                 TextField(
-                    "Ask about what happened lately, a pattern you noticed, or how to reconnect...",
+                    "Ask AI Insights...",
                     text: $text,
                     axis: .vertical
                 )

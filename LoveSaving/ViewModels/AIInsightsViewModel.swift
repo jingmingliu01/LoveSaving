@@ -12,6 +12,7 @@ final class AIInsightsViewModel: ObservableObject {
     @Published var isLoadingMessages = false
     @Published var isSending = false
     @Published var errorMessage: String?
+    @Published private(set) var failedSendDraft: String?
 
     private let logger = Logger(subsystem: "LoveSaving", category: "AIInsightsViewModel")
     private var service: AIInsightsServicing?
@@ -150,6 +151,7 @@ final class AIInsightsViewModel: ObservableObject {
         composerText = ""
         isSending = true
         errorMessage = nil
+        failedSendDraft = nil
         messages.append(userMessage)
         messages.append(assistantPlaceholder)
         updateThreadPreview(chatId: chatId, preview: trimmed, role: "user", at: userMessage.createdAt)
@@ -184,7 +186,15 @@ final class AIInsightsViewModel: ObservableObject {
         } catch {
             logger.error("AI Insights streaming failed for \(chatId, privacy: .public): \(String(describing: error), privacy: .public)")
             errorMessage = error.localizedDescription
+            failedSendDraft = trimmed
+            removeEmptyAssistantPlaceholder(messageId: assistantPlaceholder.messageId)
         }
+    }
+
+    func retryLastFailedMessage(using session: AppSession) async {
+        guard let failedSendDraft else { return }
+        composerText = failedSendDraft
+        await sendMessage(using: session)
     }
 
     func renameThread(chatId: String, title: String) async {
@@ -229,6 +239,12 @@ final class AIInsightsViewModel: ObservableObject {
         guard let index = messages.lastIndex(where: { $0.messageId == messageId }) else { return }
         messages[index].content += delta
         updateThreadPreview(chatId: selectedThreadID, preview: messages[index].content, role: "assistant", at: messages[index].createdAt)
+    }
+
+    private func removeEmptyAssistantPlaceholder(messageId: String) {
+        guard let index = messages.lastIndex(where: { $0.messageId == messageId }) else { return }
+        guard messages[index].content.isEmpty else { return }
+        messages.remove(at: index)
     }
 
     private func updateThreadPreview(chatId: String?, preview: String, role: String, at date: Date) {

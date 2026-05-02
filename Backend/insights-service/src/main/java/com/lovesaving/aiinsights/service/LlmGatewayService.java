@@ -5,17 +5,21 @@ import com.lovesaving.aiinsights.model.LocalRelationshipContext;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.http.StreamResponse;
-import com.openai.helpers.ResponseAccumulator;
 import com.openai.models.responses.ResponseCreateParams;
 import com.openai.models.responses.ResponseStreamEvent;
+import jakarta.annotation.PreDestroy;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.function.Consumer;
 import org.springframework.stereotype.Service;
 
 @Service
 public class LlmGatewayService {
 
+    private static final Duration OPENAI_REQUEST_TIMEOUT = Duration.ofSeconds(120);
+
     private final AiInsightsProperties properties;
+    private OpenAIClient openAiClient;
 
     public LlmGatewayService(AiInsightsProperties properties) {
         this.properties = properties;
@@ -65,15 +69,10 @@ public class LlmGatewayService {
             .input(userMessage)
             .build();
 
-        OpenAIClient client = OpenAIOkHttpClient.builder()
-            .apiKey(properties.getOpenaiApiKey())
-            .build();
-        ResponseAccumulator accumulator = ResponseAccumulator.create();
         StringBuilder streamedText = new StringBuilder();
 
-        try (StreamResponse<ResponseStreamEvent> streamResponse = client.responses().createStreaming(params)) {
+        try (StreamResponse<ResponseStreamEvent> streamResponse = openAiClient().responses().createStreaming(params)) {
             streamResponse.stream()
-                .peek(accumulator::accumulate)
                 .flatMap(event -> event.outputTextDelta().stream())
                 .map(textEvent -> textEvent.delta())
                 .filter(delta -> !delta.isEmpty())
@@ -86,6 +85,29 @@ public class LlmGatewayService {
         }
 
         return streamedText.toString();
+    }
+
+    private synchronized OpenAIClient openAiClient() throws IOException {
+        if (properties.getOpenaiApiKey() == null || properties.getOpenaiApiKey().isBlank()) {
+            throw new IOException("OpenAI API key is not configured.");
+        }
+
+        if (openAiClient == null) {
+            openAiClient = OpenAIOkHttpClient.builder()
+                .apiKey(properties.getOpenaiApiKey())
+                .timeout(OPENAI_REQUEST_TIMEOUT)
+                .build();
+        }
+
+        return openAiClient;
+    }
+
+    @PreDestroy
+    public synchronized void closeOpenAiClient() {
+        if (openAiClient != null) {
+            openAiClient.close();
+            openAiClient = null;
+        }
     }
 
     private String buildSystemPrompt(LocalRelationshipContext context) {

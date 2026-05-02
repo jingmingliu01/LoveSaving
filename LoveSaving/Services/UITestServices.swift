@@ -769,7 +769,7 @@ final class UITestAIInsightsService: AIInsightsServicing {
                 ]
                 for delta in deltas {
                     continuation.yield(.delta(delta))
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    try? await Task.sleep(nanoseconds: 250_000_000)
                 }
 
                 let reply = deltas.joined()

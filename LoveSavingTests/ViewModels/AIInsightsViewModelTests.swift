@@ -71,13 +71,14 @@ final class AIInsightsViewModelTests: XCTestCase {
         await viewModel.sendMessage(using: session)
 
         XCTAssertEqual(viewModel.failedSendDraft, "How do I repair the tone tonight?")
-        XCTAssertTrue(viewModel.messages.contains(where: { $0.role == "user" && $0.content == "How do I repair the tone tonight?" }))
+        XCTAssertFalse(viewModel.messages.contains(where: { $0.role == "user" && $0.content == "How do I repair the tone tonight?" }))
         XCTAssertFalse(viewModel.messages.contains(where: { $0.role == "assistant" && $0.content.isEmpty }))
 
         await viewModel.retryLastFailedMessage(using: session)
 
         await assertEventually(timeoutNanoseconds: 3_000_000_000) {
             viewModel.failedSendDraft == nil &&
+            viewModel.messages.filter { $0.role == "user" && $0.content == "How do I repair the tone tonight?" }.count == 1 &&
             viewModel.messages.contains(where: { $0.role == "assistant" && $0.content.contains("Start small tonight") })
         }
     }

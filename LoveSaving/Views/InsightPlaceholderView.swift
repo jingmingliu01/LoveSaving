@@ -360,6 +360,7 @@ private struct AIInsightsMessageList: View {
             ForEach(messages) { message in
                 AIInsightsMessageBubble(
                     message: message,
+                    isStreaming: isSending && !message.isUser && message.id == messages.last?.id,
                     isStreamingPlaceholder: isSending && !message.isUser && message.content.isEmpty,
                     rowWidth: rowWidth
                 )
@@ -373,6 +374,7 @@ private struct AIInsightsMessageList: View {
 
 private struct AIInsightsMessageBubble: View, Equatable {
     let message: AIInsightMessage
+    let isStreaming: Bool
     let isStreamingPlaceholder: Bool
     let rowWidth: CGFloat
 
@@ -403,7 +405,7 @@ private struct AIInsightsMessageBubble: View, Equatable {
                 ProgressView()
                     .controlSize(.small)
             } else {
-                AIInsightsMessageText(content: message.content)
+                AIInsightsMessageText(content: message.content, parsesMarkdown: !isStreaming)
             }
 
             Text(AppDisplayTime.estDateTime(message.createdAt))
@@ -420,9 +422,10 @@ private struct AIInsightsMessageBubble: View, Equatable {
 
 private struct AIInsightsMessageText: View {
     let content: String
+    let parsesMarkdown: Bool
 
     var body: some View {
-        if let markdown = try? AttributedString(
+        if parsesMarkdown, let markdown = try? AttributedString(
             markdown: content,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         ) {

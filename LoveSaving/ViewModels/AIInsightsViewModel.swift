@@ -132,6 +132,7 @@ final class AIInsightsViewModel: ObservableObject {
         }
 
         guard let chatId = selectedThreadID else { return }
+        let previousThread = threads.first(where: { $0.chatId == chatId })
 
         let userMessage = AIInsightMessage(
             messageId: UUID().uuidString.lowercased(),
@@ -187,7 +188,9 @@ final class AIInsightsViewModel: ObservableObject {
             logger.error("AI Insights streaming failed for \(chatId, privacy: .public): \(String(describing: error), privacy: .public)")
             errorMessage = error.localizedDescription
             failedSendDraft = trimmed
-            removeEmptyAssistantPlaceholder(messageId: assistantPlaceholder.messageId)
+            removeMessage(messageId: assistantPlaceholder.messageId)
+            removeMessage(messageId: userMessage.messageId)
+            restoreThreadPreview(chatId: chatId, from: previousThread)
         }
     }
 
@@ -241,10 +244,16 @@ final class AIInsightsViewModel: ObservableObject {
         updateThreadPreview(chatId: selectedThreadID, preview: messages[index].content, role: "assistant", at: messages[index].createdAt)
     }
 
-    private func removeEmptyAssistantPlaceholder(messageId: String) {
+    private func removeMessage(messageId: String) {
         guard let index = messages.lastIndex(where: { $0.messageId == messageId }) else { return }
-        guard messages[index].content.isEmpty else { return }
         messages.remove(at: index)
+    }
+
+    private func restoreThreadPreview(chatId: String, from previousThread: AIInsightThread?) {
+        guard let index = threads.firstIndex(where: { $0.chatId == chatId }) else { return }
+        threads[index].lastMessagePreview = previousThread?.lastMessagePreview
+        threads[index].lastMessageRole = previousThread?.lastMessageRole
+        threads[index].lastMessageAt = previousThread?.lastMessageAt
     }
 
     private func updateThreadPreview(chatId: String?, preview: String, role: String, at date: Date) {

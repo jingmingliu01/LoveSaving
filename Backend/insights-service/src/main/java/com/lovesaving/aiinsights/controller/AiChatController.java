@@ -78,12 +78,16 @@ public class AiChatController {
     }
 
     @PostMapping(path = "/{chatId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(
+    public ResponseEntity<SseEmitter> stream(
         @PathVariable String chatId,
         @Valid @RequestBody ChatTurnRequest chatTurnRequest,
         HttpServletRequest request
     ) throws IOException {
-        return chatOrchestrationService.streamChat(authenticatedUser(request), chatId, chatTurnRequest);
+        return ResponseEntity.ok()
+            .contentType(MediaType.TEXT_EVENT_STREAM)
+            .header("Cache-Control", "no-cache, no-transform")
+            .header("X-Accel-Buffering", "no")
+            .body(chatOrchestrationService.streamChat(authenticatedUser(request), chatId, chatTurnRequest));
     }
 
     private AuthenticatedUser authenticatedUser(HttpServletRequest request) {

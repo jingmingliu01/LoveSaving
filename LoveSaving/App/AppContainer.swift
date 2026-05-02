@@ -109,6 +109,7 @@ struct AppContainer {
     static func uiTest(scenario: UITestScenario) -> AppContainer {
         let store = UITestStore.makeSeeded(scenario: scenario)
         let auth = UITestAuthService(store: store)
+        let useBackendAIInsights = ProcessInfo.processInfo.environment["LOVESAVING_AI_INSIGHTS_USE_BACKEND"] == "1"
         return .init(
             authService: auth,
             userDataService: UITestUserDataService(store: store),
@@ -117,8 +118,8 @@ struct AppContainer {
             eventService: UITestEventService(store: store),
             mediaService: UITestMediaService(),
             messagingService: UITestMessagingService(),
-            aiInsightsAvailabilityService: UITestAIInsightsAvailabilityService(),
-            aiInsightsService: UITestAIInsightsService(),
+            aiInsightsAvailabilityService: useBackendAIInsights ? BackendAIInsightsAvailabilityService() : UITestAIInsightsAvailabilityService(),
+            aiInsightsService: useBackendAIInsights ? BackendAIInsightsService(authService: auth) : UITestAIInsightsService(),
             crashReporter: NoopCrashlyticsReporter(),
             runtimeMode: .uiTest(scenario)
         )

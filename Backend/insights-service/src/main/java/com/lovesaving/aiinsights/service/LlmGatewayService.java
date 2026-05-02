@@ -1,15 +1,14 @@
 package com.lovesaving.aiinsights.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lovesaving.aiinsights.config.AiInsightsProperties;
 import com.lovesaving.aiinsights.model.LocalRelationshipContext;
+import com.openai.client.OpenAIClient;
+import com.openai.client.okhttp.OpenAIOkHttpClient;
+import com.openai.core.http.StreamResponse;
+import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseStreamEvent;
+import jakarta.annotation.PreDestroy;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.function.Consumer;
 import org.springframework.stereotype.Service;
@@ -17,22 +16,13 @@ import org.springframework.stereotype.Service;
 @Service
 public class LlmGatewayService {
 
-    private final AiInsightsProperties properties;
-    private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
-    private final OpenAiResponsesStreamParser responsesStreamParser;
+    private static final Duration OPENAI_REQUEST_TIMEOUT = Duration.ofSeconds(120);
 
-    public LlmGatewayService(
-        AiInsightsProperties properties,
-        ObjectMapper objectMapper,
-        OpenAiResponsesStreamParser responsesStreamParser
-    ) {
+    private final AiInsightsProperties properties;
+    private OpenAIClient openAiClient;
+
+    public LlmGatewayService(AiInsightsProperties properties) {
         this.properties = properties;
-        this.objectMapper = objectMapper;
-        this.responsesStreamParser = responsesStreamParser;
-        this.httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
     }
 
     public String streamReply(
@@ -68,39 +58,56 @@ public class LlmGatewayService {
         String userMessage,
         Consumer<String> onDelta
     ) throws IOException, InterruptedException {
-        String systemPrompt = buildSystemPrompt(context);
-        String requestBody = objectMapper.writeValueAsString(
-            new OpenAiResponsesRequest(
-                properties.getPrimaryTextModel(),
-                systemPrompt,
-                new OpenAiInputMessage[] {
-                    new OpenAiInputMessage(
-                        "user",
-                        new OpenAiInputContent[] {
-                            new OpenAiInputContent("input_text", userMessage)
-                        }
-                    )
-                },
-                true
-            )
-        );
-
-        HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create("https://api.openai.com/v1/responses"))
-            .timeout(Duration.ofSeconds(45))
-            .header("Authorization", "Bearer " + properties.getOpenaiApiKey())
-            .header("Content-Type", "application/json")
-            .header("Accept", "text/event-stream")
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-            .build();
-
-        HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
-            throw new IOException("OpenAI request failed with status " + response.statusCode() + ": " + errorBody);
+        if (properties.getOpenaiApiKey() == null || properties.getOpenaiApiKey().isBlank()) {
+            throw new IOException("OpenAI API key is not configured.");
         }
 
-        return responsesStreamParser.forwardTextDeltas(response.body(), onDelta);
+        String systemPrompt = buildSystemPrompt(context);
+        ResponseCreateParams params = ResponseCreateParams.builder()
+            .model(properties.getPrimaryTextModel())
+            .instructions(systemPrompt)
+            .input(userMessage)
+            .build();
+
+        StringBuilder streamedText = new StringBuilder();
+
+        try (StreamResponse<ResponseStreamEvent> streamResponse = openAiClient().responses().createStreaming(params)) {
+            streamResponse.stream()
+                .flatMap(event -> event.outputTextDelta().stream())
+                .map(textEvent -> textEvent.delta())
+                .filter(delta -> !delta.isEmpty())
+                .forEach(delta -> {
+                    onDelta.accept(delta);
+                    streamedText.append(delta);
+                });
+        } catch (RuntimeException error) {
+            throw new IOException("OpenAI streaming request failed.", error);
+        }
+
+        return streamedText.toString();
+    }
+
+    private synchronized OpenAIClient openAiClient() throws IOException {
+        if (properties.getOpenaiApiKey() == null || properties.getOpenaiApiKey().isBlank()) {
+            throw new IOException("OpenAI API key is not configured.");
+        }
+
+        if (openAiClient == null) {
+            openAiClient = OpenAIOkHttpClient.builder()
+                .apiKey(properties.getOpenaiApiKey())
+                .timeout(OPENAI_REQUEST_TIMEOUT)
+                .build();
+        }
+
+        return openAiClient;
+    }
+
+    @PreDestroy
+    public synchronized void closeOpenAiClient() {
+        if (openAiClient != null) {
+            openAiClient.close();
+            openAiClient = null;
+        }
     }
 
     private String buildSystemPrompt(LocalRelationshipContext context) {
@@ -114,25 +121,5 @@ public class LlmGatewayService {
             context.longTermSummary(),
             String.join("\n- ", context.recentEvents())
         );
-    }
-
-    private record OpenAiResponsesRequest(
-        String model,
-        String instructions,
-        OpenAiInputMessage[] input,
-        boolean stream
-    ) {
-    }
-
-    private record OpenAiInputMessage(
-        String role,
-        OpenAiInputContent[] content
-    ) {
-    }
-
-    private record OpenAiInputContent(
-        String type,
-        String text
-    ) {
     }
 }

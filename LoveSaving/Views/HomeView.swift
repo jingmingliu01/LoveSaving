@@ -10,6 +10,8 @@ struct HomeView: View {
     @StateObject private var viewModel: HomeViewModel
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var composerLocation = EditableEventLocation()
+    @State private var composerLocationMessage: String?
+    @State private var isResolvingComposerLocation = false
     @State private var tapFeedbackState = HomeTapFeedbackState.rest
     @State private var tapFeedbackTask: Task<Void, Never>?
     private let tutorialStep: OnboardingPart2Step?
@@ -135,7 +137,9 @@ struct HomeView: View {
                             draft: $composerLocation,
                             currentLocation: currentEditableLocation,
                             accessibilityPrefix: "home.location",
-                            isDisabled: false
+                            isDisabled: false,
+                            statusMessage: composerLocationMessage,
+                            isResolving: isResolvingComposerLocation
                         )
                     }
 
@@ -164,14 +168,14 @@ struct HomeView: View {
 
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Submit") {
-                            Task {
-                                await viewModel.submit(
-                                    using: session,
-                                    location: composerLocation.eventLocation
-                                )
-                            }
+                            submitComposer()
                         }
-                        .disabled(viewModel.tapCount == 0 || !isSubmitInteractive || (!viewModel.isTutorialMode && composerLocation.eventLocation == nil))
+                        .disabled(
+                            viewModel.tapCount == 0
+                                || !isSubmitInteractive
+                                || (!viewModel.isTutorialMode && !composerLocation.canResolveOrSubmit)
+                                || isResolvingComposerLocation
+                        )
                         .accessibilityIdentifier("home.submit")
                         .tutorialTarget(.submit)
                     }
@@ -234,10 +238,15 @@ struct HomeView: View {
         }
         .onChange(of: viewModel.showComposer) { _, isPresented in
             if isPresented {
+                composerLocationMessage = nil
                 seedComposerLocationIfNeeded()
             } else {
                 composerLocation = EditableEventLocation()
+                composerLocationMessage = nil
             }
+        }
+        .onChange(of: composerLocation.addressText) { _, _ in
+            composerLocationMessage = nil
         }
         .onDisappear {
             tapFeedbackTask?.cancel()
@@ -295,6 +304,41 @@ struct HomeView: View {
     private func seedComposerLocationIfNeeded() {
         guard composerLocation.isBlank, let currentEditableLocation else { return }
         composerLocation = currentEditableLocation
+    }
+
+    private func submitComposer() {
+        Task { @MainActor in
+            let resolvedLocation = await resolveComposerLocationIfNeeded()
+            guard let resolvedLocation else { return }
+            await viewModel.submit(using: session, location: resolvedLocation)
+        }
+    }
+
+    @MainActor
+    private func resolveComposerLocationIfNeeded() async -> EventLocation? {
+        composerLocationMessage = nil
+
+        if let location = composerLocation.eventLocation {
+            return location
+        }
+
+        let query = composerLocation.addressText.trimmedText
+        guard !query.isEmpty else {
+            composerLocationMessage = AppError.invalidLocation.localizedDescription
+            return nil
+        }
+
+        isResolvingComposerLocation = true
+        defer { isResolvingComposerLocation = false }
+
+        do {
+            let resolvedLocation = try await locationManager.resolveLocationQuery(query)
+            composerLocation.applyResolvedLocation(resolvedLocation, fallbackAddressText: query)
+            return composerLocation.eventLocation
+        } catch {
+            composerLocationMessage = AppError.invalidLocation.localizedDescription
+            return nil
+        }
     }
 
     private func triggerTapFeedback(for type: EventType) {
@@ -368,28 +412,32 @@ private extension View {
 
 struct EditableEventLocation: Equatable {
     var addressText: String
-    var latitudeText: String
-    var longitudeText: String
+    private var latitude: Double?
+    private var longitude: Double?
+    private var resolvedAddressText: String?
 
-    init(addressText: String = "", latitudeText: String = "", longitudeText: String = "") {
+    init(addressText: String = "", latitude: Double? = nil, longitude: Double? = nil) {
         self.addressText = addressText
-        self.latitudeText = latitudeText
-        self.longitudeText = longitudeText
+        self.latitude = latitude
+        self.longitude = longitude
+        self.resolvedAddressText = addressText.trimmedText.nilIfEmpty
     }
 
     init(addressText: String = "", latitude: Double, longitude: Double) {
         self.addressText = addressText
-        self.latitudeText = Self.formatCoordinate(latitude)
-        self.longitudeText = Self.formatCoordinate(longitude)
+        self.latitude = latitude
+        self.longitude = longitude
+        self.resolvedAddressText = addressText.trimmedText.nilIfEmpty
     }
 
     var eventLocation: EventLocation? {
-        guard let latitude = Double(latitudeText.trimmedText),
-              let longitude = Double(longitudeText.trimmedText),
+        guard let latitude,
+              let longitude,
               latitude.isFinite,
               longitude.isFinite,
               Self.validLatitudeRange.contains(latitude),
-              Self.validLongitudeRange.contains(longitude) else {
+              Self.validLongitudeRange.contains(longitude),
+              isAddressResolved else {
             return nil
         }
 
@@ -402,17 +450,48 @@ struct EditableEventLocation: Equatable {
 
     var isBlank: Bool {
         addressText.trimmedText.isEmpty
-            && latitudeText.trimmedText.isEmpty
-            && longitudeText.trimmedText.isEmpty
+            && latitude == nil
+            && longitude == nil
     }
 
-    var showsInvalidCoordinates: Bool {
-        let hasCoordinateInput = !latitudeText.trimmedText.isEmpty || !longitudeText.trimmedText.isEmpty
-        return hasCoordinateInput && eventLocation == nil
+    var canResolveOrSubmit: Bool {
+        !addressText.trimmedText.isEmpty || eventLocation != nil
     }
 
-    private static func formatCoordinate(_ value: Double) -> String {
-        String(format: "%.6f", value)
+    var needsLookup: Bool {
+        let trimmedAddress = addressText.trimmedText
+        guard !trimmedAddress.isEmpty else { return false }
+        return eventLocation == nil
+    }
+
+    mutating func setAddressText(_ newValue: String) {
+        addressText = newValue
+
+        let trimmedAddress = newValue.trimmedText
+        let resolvedAddress = resolvedAddressText ?? ""
+        guard trimmedAddress == resolvedAddress else {
+            latitude = nil
+            longitude = nil
+            resolvedAddressText = nil
+            return
+        }
+    }
+
+    mutating func applyResolvedLocation(_ location: EventLocation, fallbackAddressText: String? = nil) {
+        let resolvedAddress = location.addressText?.trimmedText.nilIfEmpty
+            ?? fallbackAddressText?.trimmedText.nilIfEmpty
+            ?? addressText.trimmedText.nilIfEmpty
+
+        addressText = resolvedAddress ?? addressText
+        latitude = location.lat
+        longitude = location.lng
+        resolvedAddressText = addressText.trimmedText.nilIfEmpty
+    }
+
+    private var isAddressResolved: Bool {
+        let trimmedAddress = addressText.trimmedText
+        guard !trimmedAddress.isEmpty else { return true }
+        return trimmedAddress == resolvedAddressText
     }
 
     private static let validLatitudeRange = -90.0...90.0
@@ -425,26 +504,20 @@ struct EventLocationEditorSection: View {
     let currentLocation: EditableEventLocation?
     let accessibilityPrefix: String
     let isDisabled: Bool
+    let statusMessage: String?
+    let isResolving: Bool
 
     var body: some View {
         Section(title) {
-            TextField("Address or label", text: $draft.addressText)
+            TextField(
+                "Search address or place",
+                text: Binding(
+                    get: { draft.addressText },
+                    set: { draft.setAddressText($0) }
+                )
+            )
                 .disabled(isDisabled)
                 .accessibilityIdentifier("\(accessibilityPrefix).address")
-
-            TextField("Latitude", text: $draft.latitudeText)
-                .keyboardType(.numbersAndPunctuation)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .disabled(isDisabled)
-                .accessibilityIdentifier("\(accessibilityPrefix).latitude")
-
-            TextField("Longitude", text: $draft.longitudeText)
-                .keyboardType(.numbersAndPunctuation)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .disabled(isDisabled)
-                .accessibilityIdentifier("\(accessibilityPrefix).longitude")
 
             if let currentLocation {
                 Button("Use Current Location") {
@@ -454,10 +527,25 @@ struct EventLocationEditorSection: View {
                 .accessibilityIdentifier("\(accessibilityPrefix).current")
             }
 
-            if draft.showsInvalidCoordinates {
-                Text("Enter latitude from -90 to 90 and longitude from -180 to 180.")
+            if isResolving {
+                ProgressView("Searching location…")
+                    .font(.footnote)
+            } else if let statusMessage {
+                Text(statusMessage)
                     .font(.footnote)
                     .foregroundStyle(.red)
+            } else if draft.needsLookup {
+                Text("This text will be searched when you submit.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if draft.eventLocation != nil {
+                Text("Coordinates will be saved automatically.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Enter a place name or address to resolve the location.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
     }

@@ -257,29 +257,40 @@ final class AppSessionFlowTests: XCTestCase {
         XCTAssertEqual(session.globalErrorMessage, AppError.invalidLocation.localizedDescription)
     }
 
-    func testEditableEventLocationRejectsOutOfRangeCoordinates() {
+    func testEditableEventLocationRequiresResolvedAddressForTypedSearch() {
         let valid = EditableEventLocation(
             addressText: "Valid",
-            latitudeText: "90",
-            longitudeText: "-180"
+            latitude: 90,
+            longitude: -180
         )
         XCTAssertEqual(valid.eventLocation?.lat, 90)
         XCTAssertEqual(valid.eventLocation?.lng, -180)
-        XCTAssertFalse(valid.showsInvalidCoordinates)
+        XCTAssertFalse(valid.needsLookup)
+        XCTAssertTrue(valid.canResolveOrSubmit)
 
-        let invalidLatitude = EditableEventLocation(
-            latitudeText: "91",
-            longitudeText: "0"
-        )
-        XCTAssertNil(invalidLatitude.eventLocation)
-        XCTAssertTrue(invalidLatitude.showsInvalidCoordinates)
+        var editedAddress = valid
+        editedAddress.setAddressText("Somewhere Else")
+        XCTAssertNil(editedAddress.eventLocation)
+        XCTAssertTrue(editedAddress.needsLookup)
+        XCTAssertTrue(editedAddress.canResolveOrSubmit)
 
-        let invalidLongitude = EditableEventLocation(
-            latitudeText: "0",
-            longitudeText: "-181"
+        editedAddress.applyResolvedLocation(
+            EventLocation(lat: 40.7128, lng: -74.0060, addressText: "New York, NY"),
+            fallbackAddressText: "Somewhere Else"
         )
-        XCTAssertNil(invalidLongitude.eventLocation)
-        XCTAssertTrue(invalidLongitude.showsInvalidCoordinates)
+        XCTAssertEqual(editedAddress.eventLocation?.addressText, "New York, NY")
+        XCTAssertFalse(editedAddress.needsLookup)
+
+        let invalidCoordinates = EditableEventLocation(
+            addressText: "Invalid",
+            latitude: 91,
+            longitude: 0
+        )
+        XCTAssertNil(invalidCoordinates.eventLocation)
+
+        let blank = EditableEventLocation()
+        XCTAssertFalse(blank.canResolveOrSubmit)
+        XCTAssertNil(blank.eventLocation)
     }
 
     func testRealtimeHomeUpdatesAfterRemoteEventWrite() async throws {

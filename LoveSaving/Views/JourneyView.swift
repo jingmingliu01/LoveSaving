@@ -199,6 +199,8 @@ private struct JourneyEventEditor: View {
 
     @State private var note: String
     @State private var locationDraft: EditableEventLocation
+    @State private var locationMessage: String?
+    @State private var isResolvingLocation = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedImageData: Data?
     @State private var selectedImageExtension = "jpg"
@@ -242,7 +244,9 @@ private struct JourneyEventEditor: View {
                     draft: $locationDraft,
                     currentLocation: currentEditableLocation,
                     accessibilityPrefix: "journey.edit.location",
-                    isDisabled: false
+                    isDisabled: false,
+                    statusMessage: locationMessage,
+                    isResolving: isResolvingLocation
                 )
 
                 Section("Image") {
@@ -295,21 +299,9 @@ private struct JourneyEventEditor: View {
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") {
-                        Task {
-                            let didSave = await session.updateJourneyEvent(
-                                event,
-                                note: note,
-                                location: locationDraft.eventLocation,
-                                imageData: selectedImageData,
-                                imageFileExtension: selectedImageExtension,
-                                removeExistingImage: removeCurrentImage || selectedImageData != nil
-                            )
-                            if didSave {
-                                dismiss()
-                            }
-                        }
+                        saveJourneyEvent()
                     }
-                    .disabled(session.isBusy || locationDraft.eventLocation == nil)
+                    .disabled(session.isBusy || !locationDraft.canResolveOrSubmit || isResolvingLocation)
                     .accessibilityIdentifier("journey.edit.save")
                 }
             }
@@ -335,6 +327,9 @@ private struct JourneyEventEditor: View {
                 }
             }
         }
+        .onChange(of: locationDraft.addressText) { _, _ in
+            locationMessage = nil
+        }
     }
 
     private var currentEditableLocation: EditableEventLocation? {
@@ -344,5 +339,51 @@ private struct JourneyEventEditor: View {
             latitude: coordinate.latitude,
             longitude: coordinate.longitude
         )
+    }
+
+    private func saveJourneyEvent() {
+        Task { @MainActor in
+            let resolvedLocation = await resolveLocationIfNeeded()
+            guard let resolvedLocation else { return }
+
+            let didSave = await session.updateJourneyEvent(
+                event,
+                note: note,
+                location: resolvedLocation,
+                imageData: selectedImageData,
+                imageFileExtension: selectedImageExtension,
+                removeExistingImage: removeCurrentImage || selectedImageData != nil
+            )
+            if didSave {
+                dismiss()
+            }
+        }
+    }
+
+    @MainActor
+    private func resolveLocationIfNeeded() async -> EventLocation? {
+        locationMessage = nil
+
+        if let location = locationDraft.eventLocation {
+            return location
+        }
+
+        let query = locationDraft.addressText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            locationMessage = AppError.invalidLocation.localizedDescription
+            return nil
+        }
+
+        isResolvingLocation = true
+        defer { isResolvingLocation = false }
+
+        do {
+            let resolvedLocation = try await locationManager.resolveLocationQuery(query)
+            locationDraft.applyResolvedLocation(resolvedLocation, fallbackAddressText: query)
+            return locationDraft.eventLocation
+        } catch {
+            locationMessage = AppError.invalidLocation.localizedDescription
+            return nil
+        }
     }
 }

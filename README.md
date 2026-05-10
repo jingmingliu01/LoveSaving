@@ -1,5 +1,17 @@
 # LoveSaving
 
+<p align="center">
+  <video src="Docs/media/onboarding-share.mp4" width="260" controls muted playsinline>
+    Your browser does not support embedded video.
+  </video>
+</p>
+
+<p align="center">
+  <a href="https://www.linkedin.com/pulse/from-idea-real-user-guidance-15-1-day-without-any-animation-liu-hojce/">
+    <strong>Read the making-of: How I created this onboarding animation with AI</strong>
+  </a>
+</p>
+
 > Starting a relationship is hard; maintaining one is harder. Sometimes we break up over a minor conflict, forgetting the happiness we shared for so long.
 >
 > We choose to be blind in the heat of the moment, only to regret it seconds later.🥹

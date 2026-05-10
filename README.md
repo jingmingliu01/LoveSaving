@@ -1,10 +1,6 @@
 # LoveSaving
 
-<p align="center">
-  <video src="Docs/media/onboarding-share.mp4" width="260" controls muted playsinline>
-    Your browser does not support embedded video.
-  </video>
-</p>
+https://github.com/user-attachments/assets/ed7589c8-aa5a-42fc-b9bf-f7cdfb9d2e8c
 
 <p align="center">
   <a href="https://www.linkedin.com/pulse/from-idea-real-user-guidance-15-1-day-without-any-animation-liu-hojce/">

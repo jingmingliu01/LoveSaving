@@ -13,6 +13,7 @@ build/
 
 # Xcode user-specific files
 xcuserdata/
+.vscode/
 *.xcuserstate
 *.moved-aside
 *.pbxuser

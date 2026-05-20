@@ -1,6 +1,17 @@
 # LoveSaving
 
-https://github.com/user-attachments/assets/ed7589c8-aa5a-42fc-b9bf-f7cdfb9d2e8c
+<!-- PRODUCT_DEMO_MP4_PLACEHOLDER
+Upload assets/showcase/lovesaving-showcase.mp4 to GitHub, then paste the generated
+github.com/user-attachments/assets/... MP4 URL directly below this comment so the
+demo renders inline in the README.
+-->
+<!-- PASTE_PRODUCT_DEMO_MP4_URL_HERE -->
+
+<p align="center">
+  <a href="assets/showcase/lovesaving-showcase.mp4"><strong>Product demo MP4 source</strong></a>
+  ·
+  <a href="assets/showcase/ai-insights-safety-demo.mp4"><strong>AI Insights safety MP4 source</strong></a>
+</p>
 
 <p align="center">
   <a href="https://www.linkedin.com/pulse/from-idea-real-user-guidance-15-1-day-without-any-animation-liu-hojce/">
@@ -24,6 +35,19 @@ https://github.com/user-attachments/assets/ed7589c8-aa5a-42fc-b9bf-f7cdfb9d2e8c
 - 🪙 "Deposit" love through care, effort, and consistency
 - 📉 Reframe conflicts as small withdrawals and learning moments
 - 🌱 Build toward a healthier, more stable relationship
+
+## 🎬 Product Showcase
+
+The product demo captures a complete iOS Simulator flow: accepting an invite to form a group, confirming the group in Profile, trying the positive and negative tap animations, submitting a relationship event, and reviewing the saved moment in Journey List and Map views.
+
+<!-- AI_INSIGHTS_SAFETY_DEMO_MP4_PLACEHOLDER
+Upload assets/showcase/ai-insights-safety-demo.mp4 to GitHub, then paste the generated
+github.com/user-attachments/assets/... MP4 URL directly below this comment if you
+want the AI safety flow to render inline as a second README video.
+-->
+<!-- PASTE_AI_INSIGHTS_SAFETY_DEMO_MP4_URL_HERE -->
+
+AI Insights is also shown with safety-aware behavior: supportive relationship coaching works for normal conflict-repair prompts, while harmful tracking or intimidation requests are refused with a safer professional-help direction.
 
 ## ✨ Why It Matters
 

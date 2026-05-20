@@ -12,6 +12,7 @@ public interface InsightStorage {
     List<AiChatMessage> loadMessages(String ownerUid, String chatId);
     void appendUserMessage(String ownerUid, String chatId, String groupId, String content);
     void appendAssistantMessage(String ownerUid, String chatId, String groupId, String content);
+    default void markSafetyResponse(String ownerUid, String chatId, String groupId, String title) {}
     AiChatSummary renameChat(String ownerUid, String chatId, String title);
     void softDeleteChat(String ownerUid, String chatId);
     String refreshMemory(String groupId, String ownerUid);

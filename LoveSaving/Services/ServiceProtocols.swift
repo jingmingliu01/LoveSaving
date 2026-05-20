@@ -56,8 +56,16 @@ struct AIInsightRenameResult: Equatable, Codable, Sendable {
     let title: String
 }
 
+struct AIInsightSafetyResource: Equatable, Codable, Sendable {
+    let label: String
+    let action: String
+    let detail: String
+    let url: String?
+}
+
 enum AIInsightStreamEvent: Equatable, Sendable {
     case metadata(chatId: String, uid: String, groupId: String)
+    case safety(level: String, category: String, resources: [AIInsightSafetyResource])
     case delta(String)
     case done(title: String)
 }

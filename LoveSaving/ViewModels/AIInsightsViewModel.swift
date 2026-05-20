@@ -169,6 +169,8 @@ final class AIInsightsViewModel: ObservableObject {
                 switch event {
                 case .metadata:
                     break
+                case .safety:
+                    break
                 case .delta(let delta):
                     if !hasLoggedFirstToken {
                         logger.info("Received first AI Insights token for \(chatId, privacy: .public)")

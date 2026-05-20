@@ -34,6 +34,8 @@ ai:
   primary-multimodal-model: ${PRIMARY_MULTIMODAL_MODEL:gpt-5.4-nano}
   secondary-model-provider: ${SECONDARY_MODEL_PROVIDER:}
   secondary-text-model: ${SECONDARY_TEXT_MODEL:}
+  safety-moderation-mode: ${AI_SAFETY_MODERATION_MODE:local}
+  moderation-model: ${OPENAI_MODERATION_MODEL:omni-moderation-latest}
   recent-context-days-default: ${RECENT_CONTEXT_DAYS_DEFAULT:7}
   memory-refresh-min-interval-hours: ${MEMORY_REFRESH_MIN_INTERVAL_HOURS:48}
   memory-refresh-min-new-events: ${MEMORY_REFRESH_MIN_NEW_EVENTS:10}

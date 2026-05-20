@@ -30,8 +30,17 @@ public class LlmGatewayService {
         String userMessage,
         Consumer<String> onDelta
     ) throws IOException, InterruptedException {
+        return streamReply(context, userMessage, SafetyDecision.normal(), onDelta);
+    }
+
+    public String streamReply(
+        LocalRelationshipContext context,
+        String userMessage,
+        SafetyDecision safetyDecision,
+        Consumer<String> onDelta
+    ) throws IOException, InterruptedException {
         if (properties.isOpenAiLlmMode()) {
-            return streamOpenAiReply(context, userMessage, onDelta);
+            return streamOpenAiReply(context, userMessage, safetyDecision, onDelta);
         }
 
         return streamStubReply(context, userMessage, onDelta);
@@ -56,13 +65,14 @@ public class LlmGatewayService {
     private String streamOpenAiReply(
         LocalRelationshipContext context,
         String userMessage,
+        SafetyDecision safetyDecision,
         Consumer<String> onDelta
     ) throws IOException, InterruptedException {
         if (properties.getOpenaiApiKey() == null || properties.getOpenaiApiKey().isBlank()) {
             throw new IOException("OpenAI API key is not configured.");
         }
 
-        String systemPrompt = buildSystemPrompt(context);
+        String systemPrompt = buildSystemPrompt(context, safetyDecision);
         ResponseCreateParams params = ResponseCreateParams.builder()
             .model(properties.getPrimaryTextModel())
             .instructions(systemPrompt)
@@ -110,14 +120,30 @@ public class LlmGatewayService {
         }
     }
 
-    private String buildSystemPrompt(LocalRelationshipContext context) {
+    private String buildSystemPrompt(LocalRelationshipContext context, SafetyDecision safetyDecision) {
+        String safetyInstructions = safetyDecision != null && safetyDecision.requiresDisclaimer()
+            ? """
+                Safety requirements:
+                - Start with a brief note that AI Insights is not a therapist, doctor, lawyer, or emergency service.
+                - Do not diagnose mental-health conditions or provide a treatment plan.
+                - Do not provide instructions for self-harm, harm to others, coercive control, stalking, threats, or abuse.
+                - Encourage qualified professional support when the topic is mental health, abuse, or physical safety.
+                """
+            : """
+                Safety requirements:
+                - Do not diagnose, provide treatment plans, or replace emergency, medical, legal, or therapy support.
+                - Refuse instructions for self-harm, harm to others, coercive control, stalking, threats, or abuse.
+                """;
+
         return """
             You are an emotionally intelligent relationship coach inside the LoveSaving app.
             Use the long-term memory and recent events to provide grounded, practical advice.
+            %s
             Long-term summary: %s
             Recent events:
             - %s
             """.formatted(
+            safetyInstructions,
             context.longTermSummary(),
             String.join("\n- ", context.recentEvents())
         );

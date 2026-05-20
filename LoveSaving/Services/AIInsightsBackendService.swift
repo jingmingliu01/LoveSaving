@@ -6,6 +6,7 @@ enum AIInsightsClientError: LocalizedError {
     case invalidResponse
     case httpStatus(Int)
     case unauthorized
+    case backendStreamError(String)
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +18,8 @@ enum AIInsightsClientError: LocalizedError {
             return "AI Insights backend request failed with status \(statusCode)."
         case .unauthorized:
             return "AI Insights backend request is unauthorized."
+        case .backendStreamError(let message):
+            return message
         }
     }
 }
@@ -192,25 +195,42 @@ final class BackendAIInsightsService: AIInsightsServicing {
         guard let name else { return }
         let payload = dataLines.joined(separator: "\n")
 
+        do {
+            if let event = try AIInsightsStreamEventDecoder.decode(name: name, payload: payload, decoder: decoder) {
+                continuation.yield(event)
+            }
+        } catch let clientError as AIInsightsClientError {
+            throw clientError
+        } catch {
+            logger.error("Ignoring malformed \(name, privacy: .public) event: \(payload, privacy: .public)")
+            if name == "error" {
+                throw AIInsightsClientError.backendStreamError("AI Insights backend request failed.")
+            }
+        }
+    }
+}
+
+enum AIInsightsStreamEventDecoder {
+    static func decode(name: String?, payload: String, decoder: JSONDecoder) throws -> AIInsightStreamEvent? {
+        guard let name else { return nil }
+
         switch name {
         case "metadata":
-            do {
-                let metadata = try decoder.decode(StreamMetadata.self, from: Data(payload.utf8))
-                continuation.yield(.metadata(chatId: metadata.chatId, uid: metadata.uid, groupId: metadata.groupId))
-            } catch {
-                logger.error("Ignoring malformed metadata event: \(payload, privacy: .public)")
-            }
+            let metadata = try decoder.decode(StreamMetadata.self, from: Data(payload.utf8))
+            return .metadata(chatId: metadata.chatId, uid: metadata.uid, groupId: metadata.groupId)
+        case "safety":
+            let safety = try decoder.decode(StreamSafety.self, from: Data(payload.utf8))
+            return .safety(level: safety.level, category: safety.category, resources: safety.resources)
         case "delta":
-            continuation.yield(.delta(payload))
+            return .delta(payload)
         case "done":
-            do {
-                let done = try decoder.decode(StreamDone.self, from: Data(payload.utf8))
-                continuation.yield(.done(title: done.title ?? ""))
-            } catch {
-                logger.error("Ignoring malformed done event: \(payload, privacy: .public)")
-            }
+            let done = try decoder.decode(StreamDone.self, from: Data(payload.utf8))
+            return .done(title: done.title ?? "")
+        case "error":
+            let streamError = try decoder.decode(StreamError.self, from: Data(payload.utf8))
+            throw AIInsightsClientError.backendStreamError(streamError.message)
         default:
-            return
+            return nil
         }
     }
 }
@@ -288,7 +308,17 @@ private struct StreamMetadata: Decodable {
     let groupId: String
 }
 
+private struct StreamSafety: Decodable {
+    let level: String
+    let category: String
+    let resources: [AIInsightSafetyResource]
+}
+
 private struct StreamDone: Decodable {
     let status: String
     let title: String?
+}
+
+private struct StreamError: Decodable {
+    let message: String
 }

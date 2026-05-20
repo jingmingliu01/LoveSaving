@@ -167,6 +167,19 @@ public class InMemoryInsightsStore implements InsightStorage {
         appendMessage(ownerUid, chatId, groupId, "assistant", content);
     }
 
+    @Override
+    public void markSafetyResponse(String ownerUid, String chatId, String groupId, String title) {
+        InMemoryChatThread chat = requireOwnedChat(ownerUid, chatId);
+        if (!chat.contextGroupId.equals(groupId)) {
+            throw new AiInsightsAccessDeniedException("Chat is bound to a different group context");
+        }
+        if (!chat.isTitleUserDefined) {
+            chat.title = title;
+            chat.titleStatus = "ready";
+            chat.updatedAt = Instant.now();
+        }
+    }
+
     public List<InMemoryChatMessage> recentMessages(String chatId, int limit) {
         List<InMemoryStoredMessage> messages = chatsById.getOrDefault(chatId, InMemoryChatThread.empty()).messages;
         int start = Math.max(messages.size() - limit, 0);

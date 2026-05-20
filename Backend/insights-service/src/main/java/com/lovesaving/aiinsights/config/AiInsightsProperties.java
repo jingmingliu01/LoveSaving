@@ -20,6 +20,8 @@ public class AiInsightsProperties {
     private String primaryMultimodalModel = "gpt-5.4-nano";
     private String secondaryModelProvider;
     private String secondaryTextModel;
+    private String safetyModerationMode = "local";
+    private String moderationModel = "omni-moderation-latest";
     private int recentContextDaysDefault = 7;
     private int memoryRefreshMinIntervalHours = 48;
     private int memoryRefreshMinNewEvents = 10;
@@ -137,6 +139,22 @@ public class AiInsightsProperties {
         this.secondaryTextModel = secondaryTextModel;
     }
 
+    public String getSafetyModerationMode() {
+        return safetyModerationMode;
+    }
+
+    public void setSafetyModerationMode(String safetyModerationMode) {
+        this.safetyModerationMode = safetyModerationMode;
+    }
+
+    public String getModerationModel() {
+        return moderationModel;
+    }
+
+    public void setModerationModel(String moderationModel) {
+        this.moderationModel = moderationModel;
+    }
+
     public int getRecentContextDaysDefault() {
         return recentContextDaysDefault;
     }
@@ -191,6 +209,10 @@ public class AiInsightsProperties {
 
     public boolean isOpenAiLlmMode() {
         return "openai".equalsIgnoreCase(llmMode);
+    }
+
+    public boolean isOpenAiSafetyModerationMode() {
+        return "openai".equalsIgnoreCase(safetyModerationMode);
     }
 
     public boolean isMemoryStorageMode() {

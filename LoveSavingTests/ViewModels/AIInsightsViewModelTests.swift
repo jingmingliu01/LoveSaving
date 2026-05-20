@@ -10,6 +10,52 @@ final class AIInsightsViewModelTests: XCTestCase {
         XCTAssertNotNil(AIInsightsDateParser.parse("2026-04-01T15:59:59.026482193Z"))
     }
 
+    func testBackendStreamErrorEventThrowsReadableError() async throws {
+        AIInsightsErrorEventURLProtocol.responseBody = """
+        event:error
+        data:{"message":"AI Insights backend failed while preparing the reply."}
+
+        """
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AIInsightsErrorEventURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let authService = UITestAuthService(store: UITestStore.makeSeeded(scenario: .linked))
+        let service = BackendAIInsightsService(
+            configuration: AIInsightsBackendConfiguration(baseURL: URL(string: "http://127.0.0.1:8080")!),
+            session: urlSession,
+            authService: authService
+        )
+
+        do {
+            for try await _ in service.streamReply(chatId: "chat", contextGroupId: "group", message: "Hi") {}
+            XCTFail("Expected the stream error event to throw.")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "AI Insights backend failed while preparing the reply.")
+        }
+    }
+
+    func testBackendSafetyEventDoesNotThrow() async throws {
+        let event = try AIInsightsStreamEventDecoder.decode(
+            name: "safety",
+            payload: #"{"level":"REFUSAL","category":"SELF_HARM","resources":[{"label":"988 Suicide & Crisis Lifeline","action":"call_or_text","detail":"Call or text 988.","url":"https://988lifeline.org/"}]}"#,
+            decoder: JSONDecoder()
+        )
+
+        XCTAssertEqual(event, .safety(
+            level: "REFUSAL",
+            category: "SELF_HARM",
+            resources: [
+                AIInsightSafetyResource(
+                    label: "988 Suicide & Crisis Lifeline",
+                    action: "call_or_text",
+                    detail: "Call or text 988.",
+                    url: "https://988lifeline.org/"
+                )
+            ]
+        ))
+    }
+
     func testRefreshThreadsDefaultsToMostRecentThread() async {
         let service = AIInsightsServiceStub()
         let viewModel = AIInsightsViewModel()
@@ -176,6 +222,46 @@ private struct AvailableAIInsightsAvailabilityService: AIInsightsAvailabilitySer
             )
         )
     }
+}
+
+private final class AIInsightsErrorEventURLProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var storedResponseBody = ""
+
+    static var responseBody: String {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedResponseBody
+        }
+        set {
+            lock.lock()
+            storedResponseBody = newValue
+            lock.unlock()
+        }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/event-stream"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(Self.responseBody.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
 
 @MainActor

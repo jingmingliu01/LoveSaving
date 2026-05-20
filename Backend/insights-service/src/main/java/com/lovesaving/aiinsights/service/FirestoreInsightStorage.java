@@ -127,6 +127,28 @@ public class FirestoreInsightStorage implements InsightStorage {
     }
 
     @Override
+    public void markSafetyResponse(String ownerUid, String chatId, String groupId, String title) {
+        try {
+            DocumentSnapshot snapshot = chatDocument(chatId).get().get();
+            ensureChatOwnership(ownerUid, snapshot);
+            ensureChatContext(snapshot, groupId);
+            if (Boolean.TRUE.equals(snapshot.getBoolean("isTitleUserDefined"))) {
+                return;
+            }
+
+            Map<String, Object> titleFields = new HashMap<>();
+            titleFields.put("title", sanitizeTitle(title));
+            titleFields.put("titleStatus", "ready");
+            titleFields.put("isTitleUserDefined", false);
+            upsertChatMetadata(ownerUid, chatId, groupId, titleFields, false);
+        } catch (AiInsightsAccessDeniedException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to mark Firestore safety response", exception);
+        }
+    }
+
+    @Override
     public AiChatSummary renameChat(String ownerUid, String chatId, String title) {
         try {
             DocumentSnapshot snapshot = chatDocument(chatId).get().get();

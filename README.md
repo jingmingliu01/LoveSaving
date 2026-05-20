@@ -1,11 +1,10 @@
 # LoveSaving
 
-<!-- PRODUCT_DEMO_MP4_PLACEHOLDER
-Upload assets/showcase/lovesaving-showcase.mp4 to GitHub, then paste the generated
-github.com/user-attachments/assets/... MP4 URL directly below this comment so the
-demo renders inline in the README.
--->
-<!-- PASTE_PRODUCT_DEMO_MP4_URL_HERE -->
+https://github.com/user-attachments/assets/7d0a1380-ecdd-46ff-84fd-4a6b50d67324
+
+https://github.com/user-attachments/assets/e6e2f360-29c5-4bc8-9b67-caa014d999e4
+
+https://github.com/user-attachments/assets/88c70dd7-f4b4-47ea-bbac-cdf01a600984
 
 <p align="center">
   <a href="assets/showcase/lovesaving-showcase.mp4"><strong>Product demo MP4 source</strong></a>

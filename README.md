@@ -1,11 +1,5 @@
 # LoveSaving
 
-https://github.com/user-attachments/assets/7d0a1380-ecdd-46ff-84fd-4a6b50d67324
-
-https://github.com/user-attachments/assets/e6e2f360-29c5-4bc8-9b67-caa014d999e4
-
-https://github.com/user-attachments/assets/88c70dd7-f4b4-47ea-bbac-cdf01a600984
-
 <p align="center">
   <a href="assets/showcase/lovesaving-showcase.mp4"><strong>Product demo MP4 source</strong></a>
   ·
@@ -25,6 +19,12 @@ https://github.com/user-attachments/assets/88c70dd7-f4b4-47ea-bbac-cdf01a600984
 > What if we could visualize that love? What if, instead of walking away, we could treat conflicts as a small withdrawal from our "saving account" — not as punishment, but as a lesson?
 >
 > Meet **LoveSaving**: Visualize, deposit, and grow your love for a more stable relationship. ❤️
+
+https://github.com/user-attachments/assets/7d0a1380-ecdd-46ff-84fd-4a6b50d67324
+
+https://github.com/user-attachments/assets/e6e2f360-29c5-4bc8-9b67-caa014d999e4
+
+https://github.com/user-attachments/assets/88c70dd7-f4b4-47ea-bbac-cdf01a600984
 
 ## 💡 What Is LoveSaving?
 
